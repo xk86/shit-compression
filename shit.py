@@ -62,21 +62,34 @@ def process_segment(input_file, output_file, interest, mode="encode"):
     # The speed factor is the inverse of the interest value.
     # Some filters will take the speed factor as an argument, while others will take the interest value.
     # The filters will be inverse for the encode and decode passes.
+    audio = True 
     speed_factor = 1
     speed_filter = ""
     target_framerate = 30
     base_audio_sample_rate = get_audio_sample_rate(input_file)
+    if base_audio_sample_rate == 0:
+      logger.info("No audio detected in input file, disabling audio")
+      audio = False
     source_audio_sr = get_audio_sample_rate(INPUT_VIDEO)
     fr_cmd = []
+    vf_head = "[0:v]"
+    vf_tail = "[v]"
+
+
+    # Encode pass
     if mode == "encode":
       # For the encode pass, the interest will be <1, so speed_factor should be >1
+      video_filter = f"{vf_head}"
       speed_factor = 1 / interest
+      source_framerate = get_video_metadata(INPUT_VIDEO)["fps"]
 
       #target_framerate = get_video_metadata(input_file)["fps"] * speed_factor
-      target_framerate = get_video_metadata(INPUT_VIDEO)["fps"]
       # Setpts is takes a frequency value, so we use interest.
       # We don't need to motion interpolate on the encode pass, as just increasing the output framerate will be enough, and faster.
-      video_filter = f"[0:v]setpts={interest}*PTS[v]"
+      video_filter += f"setpts={interest}*PTS"
+      if DEBUG:
+        video_filter += f",drawtext=fontfile=AndaleMono.ttf:text='in encode, fps={source_framerate}, aset fps={source_framerate * speed_factor}':x=(w-text_w)/2:y=(h-text_h)/2:fontsize=48:fontcolor='#4c1659'@0.9"
+      
 
       # Rubberband version is slower, and preserves the tempo (which isn't necessary, since we're going to slow it down later)
       # It results in some very interesting decode artifacts.
@@ -84,44 +97,43 @@ def process_segment(input_file, output_file, interest, mode="encode"):
 
       # asetrate version. Increases the sample rate, which speeds the audio up, and then resample down to the source sample rate.
       audio_filter = f"[0:a]asetrate={base_audio_sample_rate}*{speed_factor},aresample={source_audio_sr}[a]" # We can resample to super high quality for processing, but it can cause issues with scenes with interest of 1
-      fr_cmd = ["-r", str(target_framerate)]
+      fr_cmd = ["-r", str(source_framerate)]
 
-      speed_filter = f"{video_filter};{audio_filter}"
 
-      # Atempo + asetrate
-
-      #speed_filter = f"[0:v]minterpolate=fps={fps},minterpolate=mi_mode=blend[v];[0:a]rubberband=tempo={speed_factor}[a]"
-#    if mode == "encode_final":
-#      # Final encode pass where we're reencoding the concatenated segments.
-#      target_framerate = get_video_metadata(INPUT_VIDEO)["fps"]
-#      audio_filter = f"[0:a]aresample={base_audio_sample_rate}[a]"
-#      video_filter = f"[0:v]null[v]"
-#      speed_filter = f"{video_filter};{audio_filter}"
-
+    # Decode pass
     if mode == "decode":
       # For the decode pass, the speed factor will be <1, so we will slow down the video.
+      video_filter = f"{vf_head}"
       speed_factor = interest # Value to be used to slow down the video
       source_file_fps = get_video_metadata(INPUT_VIDEO)["fps"]
       logger.debug(f"{str(source_file_fps)} {target_framerate}")
       # Note that it's equal to the interest, it's already <1.
       # Uncomment to use setpts instead of minterpolate, much faster, lower quality
+
       if MINTERP:
-        video_filter = f"[0:v]minterpolate=fps={target_framerate},minterpolate=mi_mode=blend,setpts={interest}*PTS[v]"
+        video_filter += f"minterpolate=fps={target_framerate},minterpolate=mi_mode=blend,setpts={interest}*PTS{vf_tail}"
       else:
-        video_filter = f"[0:v]setpts={interest}*PTS[v]"
+        video_filter += f"setpts={interest}*PTS"
+
+      if DEBUG:
+        video_filter += f",drawtext=fontfile=AndaleMono.ttf:text='in decode, fps={source_file_fps}':x=(w-text_w)/2:y=((h-text_h)/2)-text_h:fontsize=48:fontcolor='#4c1659'@0.9"
+
       audio_filter = f"[0:a]asetrate={base_audio_sample_rate}*{1/interest},aresample={source_audio_sr}[a]"
 
       # Interpolation based filter to reconstruct frames.
       target_framerate = source_file_fps * speed_factor # for minterpolate
-      speed_filter = f"{video_filter};{audio_filter}"
       fr_cmd = ["-r", str(target_framerate)]
 
+    # Final decode pass
     if mode == "decode-final":
       # Final decode pass where we're setting the framerate and audio sample rate back to normal.
       base_audio_sample_rate = get_audio_sample_rate(INPUT_VIDEO)
       target_framerate = get_video_metadata(INPUT_VIDEO)["fps"]
       audio_filter = f"[0:a]aresample={base_audio_sample_rate}[a]"
-      speed_filter = f"[0:v]null[v];{audio_filter}"
+      video_filter = f"{vf_head}"
+      
+      video_filter += f"null"
+
       fr_cmd = ["-r", str(target_framerate)]
 
     metadata = get_video_metadata(INPUT_VIDEO)
@@ -129,20 +141,24 @@ def process_segment(input_file, output_file, interest, mode="encode"):
     logger.debug(metadata)
     logger.debug(f"source bfps {INPUT_VIDEO} {get_bit_frame_rate(INPUT_VIDEO)}\ntarget bfps {input_file} {get_bit_frame_rate(input_file)}")
 
+    # Add tail at the very end
+    video_filter += vf_tail
     # If you use high speed intermediaries, there's not as much lost even if it gets dropped down to 30fps.
+    speed_filter = f"{video_filter};{audio_filter}" if audio else video_filter
 
+    # The final command to run
     ffmpeg_cmd = [
         "ffmpeg", "-y",
         "-i", input_file,
         "-filter_complex", speed_filter, #f"[0:v]setpts={setpts_factor}*PTS[v];[0:a]rubberband=tempo={rubberband_factor}[a]",
-        "-map", "[v]", "-map", "[a]",
+        "-map", "[v]", *[s for s in ["-map", "[a]"] if audio],
         "-row-mt", "1",  # Enable multi-threading
         "-c:v", metadata["vcodec"],  # Change to a faster video codec
         #"-crf", str(metadata["vcrf"]),  # Adjust quality here
         "-b:v", str(get_bit_frame_rate(INPUT_VIDEO) * target_framerate),  # Adjust bitrate here
         #"-q:v", str(metadata["vcrf"]), # Value 0-100, 0 is worse, 100 is best (h264_videotoolbox)
-        "-c:a", metadata["acodec"],  # Change to a faster audio codec (using default for testing)
-        "-b:a", str(metadata["abitrate"]),  # Adjust audio bitrate here
+        *[s for s in ["-c:a", metadata["acodec"]] if audio],
+        *[s for s in ["-b:a", str(metadata["abitrate"])] if audio],  # Adjust audio bitrate here
         #"-q:a", str(metadata["acrf"]), # 0-14
         #"-ar", "128000",
         "-fflags", "+genpts",
@@ -152,12 +168,12 @@ def process_segment(input_file, output_file, interest, mode="encode"):
         output_file
     ]
 
-    logger.debug(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
+    logger.info(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
     result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    logger.debug(f"FFmpeg stdout: {result.stdout}")
+    logger.debug(f"FFmpeg stderr: {result.stderr}")
 
     if result.returncode != 0:
-        logger.error(f"FFmpeg stdout: {result.stdout}")
-        #logger.error(f"FFmpeg stderr: {result.stderr}")
         raise RuntimeError(f"FFmpeg command failed with return code {result.returncode}")
 
 
@@ -166,8 +182,7 @@ def concatenate_segments(file_list_path, output_file, metadata):
     logger.info(f"Concatenating segments in {file_list_path} into {output_file}")
     result = subprocess.run([
         "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", file_list_path,
-        "-c:v", "copy",  # Copy codec to avoid re-encoding
-        "-c:a", "copy",
+        "-c", "copy",  # Copy codec to avoid re-encoding
         #"-c:a", metadata["acodec"],  
         #"-af", "[0:a]concat=n=1:v=0:a=1[a]",  # Concatenate audio streams
         "-fflags", "+genpts",
@@ -212,12 +227,12 @@ def split_video(input_file, segments, prefix):
             "-f", "matroska", full_output_path  # Use .mkv format
         ]
 
-        logger.debug(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
+        logger.info(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
         result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        logger.debug(f"FFmpeg stdout: {result.stdout}")
+        logger.debug(f"FFmpeg stderr: {result.stderr}")
 
         if result.returncode != 0:
-            logger.error(f"FFmpeg stdout: {result.stdout}")
-            logger.error(f"FFmpeg stderr: {result.stderr}")
             raise RuntimeError(f"FFmpeg command failed with return code {result.returncode}")
 
         logger.debug(f"Segment {i} split {start} - {end}: {full_output_path}")
