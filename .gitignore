@@ -4,3 +4,5 @@
 temp*/
 /__pycache__
 .DS_Store
+oldlib.py
+old-main.py

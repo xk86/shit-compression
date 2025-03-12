@@ -5,230 +5,39 @@ import warnings
 from typing import List
 from mdtypes import EssentialMetadataDict, FilterDict
 
-def estimate_compression(original_duration: float, encode_filters: List[FilterDict]) -> tuple[float, float]:
-    """
-    Estimate total video duration after encoding segments.
+class FFMPegCommand():
+  def __init__(self, type: str, input_file: str, output_file: str):
+    self.type = type
+    self.input_file = input_file
+    self.output_file = output_file
+    self.input_metadata = get_video_metadata(input_file)
+    self.complex_filters = ["-filter_complex", ""]
 
-    Parameters:
-        original_duration (float): Duration of original video in seconds.
-        encode_filters (list): List of dicts [{"location": start, "duration": duration, "intensity": intensity}, ...]
+  def set_filter(self, filter: str):
+    self.complex_filters[1] = filter
 
-    Returns:
-        compressed_duration (float), compression_ratio (float)
-    """
-    encoded_time = sum(f["duration"] for f in encode_filters)
-    compressed_time = sum(f["duration"] / f["intensity"] for f in encode_filters)
 
-    total_compressed_duration = original_duration - encoded_time + compressed_time
-    compression_ratio = total_compressed_duration / original_duration
 
-    print(f"Original duration: {original_duration}, Encoded time: {encoded_time}, Compressed time: {compressed_time}, Total compressed duration: {total_compressed_duration}")
-
-    return total_compressed_duration, compression_ratio
-
-def generate_decode_filters(encode_filters: List[FilterDict], original_duration: float) -> List[FilterDict]:
-    """
-    Given a list of encoding filter dictionaries, generate the corresponding decoding filters
-    that will expand the compressed video back to its original duration.
-
-    Parameters:
-        encode_filters (list): List of dicts [{"location": start, "duration": duration, "intensity": intensity}, ...]
-        original_duration (float): The original, pre-compression video duration.
-
-    Returns:
-        List of dicts: [{"location": start, "duration": duration, "intensity": decode_intensity}, ...]
-    """
-    decode_filters = []
-
-    for f in encode_filters:
-        decode_intensity = 1 / f["intensity"]  # Reverse intensity (slows it back down)
-        decode_filters.append({
-            "location": f["location"],
-            "duration": f["duration"],
-            "intensity": decode_intensity
-        })
-
-    return decode_filters
-
-def generate_encode_pass_timestamps(filters: List[FilterDict]) -> List[tuple]:
-    """
-    Generates explicit start and end timestamps ensuring no overlaps for encoding pass.
-    
-    Parameters:
-        filters (list): List of dicts {'location', 'duration', 'intensity'} (intensity > 1.0).
-
-    Returns:
-        List of tuples: [(start, end, intensity), ...]
-    """
-    segments = sorted(
-        [(f["location"], f["location"] + f["duration"], f["intensity"])
-         for f in filters if f["intensity"] > 1.0],
-        key=lambda x: x[0]
-    )
-
-    non_overlapping = []
-    last_end = -1
-    for start, end, intensity in segments:
-        if start >= last_end:
-            non_overlapping.append((start, end, intensity))
-            last_end = end
-        else:
-            raise ValueError(f"Overlapping segments detected at {start}-{end}")
-
-    return non_overlapping
-
-def validate_filters(filters: List[FilterDict], original_duration: float):
-    """
-    Validate that the filters do not overlap and are within the video duration.
-
-    Parameters:
-        filters (list): List of dicts [{"location": start, "duration": duration, "intensity": intensity}, ...]
-        original_duration (float): Duration of original video in seconds.
-
-    Raises:
-        ValueError: If filters overlap or are out of bounds.
-    """
-    last_end = 0
-    for f in sorted(filters, key=lambda x: x['location']):
-        if f['location'] < last_end:
-            raise ValueError(f"Overlapping filters detected at {f['location']}")
-        if f['location'] + f['duration'] > original_duration:
-            raise ValueError(f"Filter at {f['location']} exceeds video duration")
-        last_end = f['location'] + f['duration']
-
-def generate_identity_filters(filters: List[FilterDict], original_duration: float) -> List[FilterDict]:
-    """
-    Generate identity filters (intensity of 1) for the gaps in the filter list to cover the entire video.
-
-    Parameters:
-        filters (list): List of dicts [{"location": start, "duration": duration, "intensity": intensity}, ...]
-        original_duration (float): Duration of original video in seconds.
-
-    Returns:
-        List of dicts: Complete list of filters covering the entire video.
-    """
-    identity_filters = []
-    last_end = 0
-    for f in sorted(filters, key=lambda x: x['location']):
-        if f['location'] > last_end:
-            identity_filters.append({
-                "location": last_end,
-                "duration": f['location'] - last_end,
-                "intensity": 1.0
-            })
-        identity_filters.append(f)
-        last_end = f['location'] + f['duration']
-    if last_end < original_duration:
-        identity_filters.append({
-            "location": last_end,
-            "duration": original_duration - last_end,
-            "intensity": 1.0
-        })
-    return identity_filters
-
-# Function to split and process the video based on specified speed adjustments
-def split_and_process_video(input_file: str, output_file: str, filters: List[FilterDict], mode: str = "encode"):
-    temp_dir = os.path.join(os.getcwd(), f'temp_processing_{mode}')
-    os.makedirs(temp_dir, exist_ok=True)
-    duration = get_video_duration(input_file)
-    validate_filters(filters, duration)
-    filters = generate_identity_filters(filters, duration)
-    metadata = get_video_metadata(input_file)
-    last_split = 0
-    part_index = 0
-
-    concat_list_path = os.path.join(temp_dir, "concat_list.txt")
-
-    if mode == "decode":
-        filters = generate_decode_filters(filters, duration)
-
-    with open(concat_list_path, "w") as concat_list:
-        for f in sorted(filters, key=lambda x: x['location']):
-            location, duration_segment = f["location"], f["duration"]
-            intensity = f["intensity"]
-
-            if location > last_split:
-                normal_segment = os.path.join(f"part_{part_index}.mp4")
-                extract_segment(input_file, last_split, location, normal_segment)
-                concat_list.write(f"file '{normal_segment}'\n")
-                part_index += 1
-                print(f"Normal segment: start={last_split}, end={location}")
-
-            modified_segment = os.path.join(f"part_{part_index}.mp4")
-            print(f"{mode.capitalize()} segment: start={location}, end={location + duration_segment}, intensity={intensity}")
-            try:
-                if intensity == 1.0:
-                    # Pass through unchanged segments
-                    extract_segment(input_file, location, location + duration_segment, modified_segment)
-                else:
-                    process_segment(input_file, location, location + duration_segment, modified_segment, intensity, metadata, mode)
-                    if mode == "decode":
-                        verify_decoded_duration(modified_segment, duration_segment)
-            except ValueError as e:
-                print(f"Warning: {e}")
-            concat_list.write(f"file '{modified_segment}'\n")
-            part_index += 1
-            last_split = location + duration_segment
-
-        if last_split < duration:
-            remaining_segment = os.path.join(f"part_{part_index}.mp4")
-            extract_segment(input_file, last_split, duration, remaining_segment)
-            concat_list.write(f"file '{remaining_segment}'\n")
-            print(f"Remaining segment: start={last_split}, end={duration}")
-
-    concatenate_segments(concat_list_path, output_file, metadata)
-
-def process_segment(input_file: str, start: float, end: float, output_file: str, intensity: float, metadata: EssentialMetadataDict, mode: str = "encode"):
-    if intensity == 1.0:
-        vf = "null"  # No video filter
-        af = "anull"  # No audio filter
-    elif mode == "decode":
-        vf = f"setpts={intensity}*PTS"  # Slow down video
-        af = f"rubberband=tempo={1/intensity}"  # Slow down audio
-    else:
-        vf = f"setpts={1/intensity}*PTS"  # Speed up video
-        af = f"rubberband=tempo={intensity}"  # Speed up audio
-
-    segment_duration = end - start
-    print(f"Processing segment: start={start}, end={end}, duration={segment_duration}, intensity={intensity}, mode={mode}")
-    print(f"Video filter: {vf}")
-    print(f"Audio filter: {af}")
-
-    if segment_duration <= 0:
-        warnings.warn(f"Invalid segment duration: start={start}, end={end}, duration={segment_duration}")
-        return
-
-    ffmpeg_cmd = [
-        "ffmpeg", "-i", input_file, "-ss", str(start), "-to", str(end),
-        "-vf", vf,
-        "-af", af,
-        "-c:v", metadata["vcodec"], "-crf", str(metadata["vcrf"]), "-b:v", str(metadata["vbitrate"]),
-        "-c:a", metadata["acodec"], "-b:a", str(metadata["abitrate"]),
-        "-r", str(metadata["fps"]),
-        "-fflags", "+genpts",
-        "-avoid_negative_ts", "make_zero",
-        "-y", output_file
-    ]
-    print(f"Running ffmpeg command: {' '.join(ffmpeg_cmd)}")
-    result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    print(f"ffmpeg error: {result.stderr}")
-    if "Warning" in result.stderr:
-        print(f"ffmpeg warning: {result.stderr}")
-    result.check_returncode()
-
-    # Verify the duration of the processed segment
-    actual_duration = get_video_duration(output_file)
-    if mode == "decode":
-        expected_duration = end - start
-    else:
-        expected_duration = (end - start) / intensity
-    print(f"Verifying processed segment duration: expected={expected_duration}, actual={actual_duration}, file={output_file}")
-    if not math.isclose(actual_duration, expected_duration, rel_tol=0.01):
-        warnings.warn(f"Processed segment duration mismatch: expected {expected_duration}, got {actual_duration}")
 
 def get_video_duration(input_file: str) -> float:
     result = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", input_file], stdout=subprocess.PIPE, text=True, check=True)
     return float(result.stdout.strip())
+
+def get_audio_sample_rate(input_file: str) ->float:
+    result = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=sample_rate", "-of", "csv=p=0", input_file], stdout=subprocess.PIPE, text=True, check=True)
+    return float(result.stdout.strip())
+
+def get_bit_rate(input_file: str, type: str = "video") ->float:
+  
+  # Try to get bitrate without having to compute
+  base_cmd = ["ffprobe"]
+
+  # Bitrate wasn't stored in the metadata, so we calculate it
+  fail_base_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_packets", "-show_entries", "packet=size", "-of", "csv=p=0", input_file]
+  if type == "video":
+    cmd = fail_base_cmd
+  elif type == "audio":
+    cmd = fail_base_cmd[4] = "a:0"
 
 def get_video_metadata(input_file: str) -> EssentialMetadataDict:
     video_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name,width,height,r_frame_rate", "-of", "csv=p=0", input_file]
@@ -242,6 +51,9 @@ def get_video_metadata(input_file: str) -> EssentialMetadataDict:
     video_result = video_output.split(',') if video_output else []
     audio_result = audio_output.split(',') if audio_output else []
     format_result = format_output.split(',') if format_output else []
+#
+#    if format_result[0] == "N/A":
+#      print(video_size)
 
     vcodec = video_result[0] if len(video_result) > 0 else "h264"
     width = int(video_result[1]) if len(video_result) > 1 and video_result[1].isdigit() else 1920
@@ -296,11 +108,13 @@ def estimate_crf(codec: str, bitrate: int, resolution: tuple, fps: float) -> int
 
     # Define CRF range per codec (min_crf = highest quality, max_crf = lowest quality)
     codec_crf_range = {
-        'h264': (0, 51),
-        'hevc': (0, 51),
+#        'h264': (0, 51), # default values
+#        'hevc': (0, 51),
+        'h264': (1, 100), # apple values
+        'hevc': (1, 100),
         'libvpx-vp9': (0, 63),
         'av1': (0, 63),
-        'aac': (1, 5),
+        'aac': (1, 14),
         'libopus': (64, 128),
         'libvorbis': (0, 10)  # Added libvorbis support
     }
@@ -312,22 +126,36 @@ def estimate_crf(codec: str, bitrate: int, resolution: tuple, fps: float) -> int
     pixels = width * height
 
     # Compute quality score
-    quality_score = (bitrate / (pixels * fps))  # bits per pixel-frame
+    #quality_score = (bitrate / (pixels * fps))  # bits per pixel-frame
+    quality_score = (pixels * fps) / bitrate  # Higher means lower quality (fewer bits per pixel-frame)
+
+    print(f"Quality score: {quality_score}")
 
     # Apply logarithmic scaling to distribute values evenly
     scaled_score = math.log1p(quality_score)
 
+    print(f"Scaled score: {scaled_score}")
+
     # Normalize scaled score between 0 and 1 based on practical observed ranges
     # Assumption: scaled_score typically varies between -1.0 (excellent) and ~2.0 (poor)
-    min_log, max_log = -1.0, 2.0
+    min_log, max_log = 0,5
     normalized_score = (scaled_score - min_log) / (max_log - min_log)
+    print(f"Normalized score (pre-clamp): {normalized_score}")
     normalized_score = min(max(normalized_score, 0), 1)  # Clamp 0-1
+    print(f"Normalized score: {normalized_score}")
 
-    # Map normalized score inversely to CRF range (higher quality = lower CRF)
     min_crf, max_crf = codec_crf_range[codec]
-    estimated_crf = min_crf + (1 - normalized_score) * (max_crf - min_crf)
+
+    # If we're on Apple, the CRF is inverted (higher quality = higher CRF)
+    # So we map the normalized score inversely to the CRF range
+    if codec == 'h264' or codec == 'hevc':
+      estimated_crf = min_crf + (1 - normalized_score) * (max_crf - min_crf)
+    else:
+      estimated_crf = min_crf + normalized_score * (max_crf - min_crf)
+    # Map normalized score inversely to CRF range (higher quality = lower CRF)
 
     return int(round(estimated_crf))
+
 
 def compute_quality_score(bitrate: int, resolution: tuple, fps: float) -> float:
     width, height = resolution
