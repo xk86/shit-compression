@@ -10,6 +10,7 @@ ffmpeg -y \
                         [0:v][overlay]overlay=x='(W-100)*(0.5+0.5*cos(PI*t/2))': \
                                               y='(H-100)*(0.5+0.5*sin(PI*t/3))'[v1]; \
                         [v1]drawtext=text=%{n}:fontsize=72:r=60:x=(w-tw)/2:y=h-(2*lh):fontcolor=white:box=1:boxcolor=0x00000099[vfinal]" \
+       -force_key_frames "60,120,180" \
        -map "[vfinal]" -map 1:a \
        -af "volume=-18dB" \
        -c:a libopus \
