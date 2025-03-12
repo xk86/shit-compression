@@ -23,7 +23,8 @@ if not logger.hasHandlers():
          'CRITICAL': 'red,bg_white',
       }
   ))
-  functions_to_watch = ["get_mutated_segments", "adjust_segments_to_keyframes", "add_pass_through_segments", "split_video", "concatenate_segments", "encode_segments", "decode_segments"]
+  #functions_to_watch = ["get_mutated_segments", "adjust_segments_to_keyframes", "add_pass_through_segments", "split_video", "concatenate_segments", "encode_segments", "decode_segments"]
+  functions_to_watch = ['split_video', 'concatenate_segments', 'encode_segments', 'decode_segments', 'process_segment']
   #functions_to_watch = ["add_pass_through_segments"]
 
   ff = FunctionFilter(functions_to_watch)
