@@ -1,6 +1,10 @@
-from lib import debug_print
 import os
 import subprocess
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 def add_pass_through_segments(segments, original_duration):
     """Add pass-through segments with intensity 1 between the given segments."""
@@ -37,7 +41,7 @@ def add_pass_through_segments(segments, original_duration):
             "end": original_duration,
             "interest": 1.0
         })
-    debug_print(f"New segments with pass-through: {new_segments}")
+    logger.debug(f"New segments with pass-through: {new_segments}")
     return new_segments
 
 
@@ -49,7 +53,7 @@ def calculate_compressed_duration(original_duration, segments):
         segment_duration = end - start
         compressed_segment_duration = segment_duration * interest
         compressed_duration += compressed_segment_duration
-        print(f"Segment {start}-{end} with interest {interest}: Original segment duration: {segment_duration}, Compressed segment duration = {compressed_segment_duration}")
+        logger.info(f"Segment {start}-{end} with interest {interest}: Original segment duration: {segment_duration}, Compressed segment duration = {compressed_segment_duration}")
 
     # Add the duration of the parts of the video not covered by segments
     total_segment_duration = sum(seg["end"] - seg["start"] for seg in segments)
@@ -70,7 +74,7 @@ def calculate_expanded_duration(compressed_duration, segments):
 
         expanded_segment_duration = compressed_duration / interest
         expanded_duration += expanded_segment_duration
-        print(f"Segment {start}-{end} with interest {interest}: Compressed segment duration: {compressed_duration}, Expanded segment duration = {expanded_segment_duration}")
+        logger.info(f"Segment {start}-{end} with interest {interest}: Compressed segment duration: {compressed_duration}, Expanded segment duration = {expanded_segment_duration}")
 
     # Add the duration of the parts of the video not covered by segments
     total_segment_duration = sum(seg["end"] - seg["start"] for seg in segments)
@@ -108,7 +112,7 @@ def get_mutated_segments(original_duration, segments):
             "interest": 1.0
         })
 
-    debug_print(f"Mutated segments: {mutated_segments}")
+    logger.debug(f"Mutated segments: {mutated_segments}")
     return mutated_segments
 
 
@@ -138,12 +142,12 @@ def adjust_segments_to_keyframes(input_file, segments, temp_dir):
                     try:
                         keyframes.append(float(parts[1]))
                     except ValueError:
-                        print(f"Skipping invalid keyframe timestamp: {parts[1]}")
+                        logger.warning(f"Skipping invalid keyframe timestamp: {parts[1]}")
     
     if not keyframes:
         raise RuntimeError("No keyframes found in the input file.")
     
-    print(f"Found {len(keyframes)} keyframes.")
+    logger.info(f"Found {len(keyframes)} keyframes.")
     
     # Adjust segments to the closest keyframes
     adjusted_segments = []
