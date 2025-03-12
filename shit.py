@@ -121,7 +121,7 @@ def process_segment(input_file, output_file, interest, mode="encode", segments=[
       audio_filter = f"[0:a]asetrate={base_audio_sample_rate}*{1/interest},aresample={source_audio_sr}[a]"
 
       # Interpolation based filter to reconstruct frames.
-      target_framerate = source_file_fps * speed_factor # for minterpolate
+      target_framerate = (source_file_fps * speed_factor) if MINTERP else source_file_fps # for minterpolate
       fr_cmd = ["-r", str(target_framerate)]
 
     # Final decode pass
@@ -382,8 +382,8 @@ if __name__ == "__main__":
     encode_adjusted_segments = adjust_segments_to_keyframes(INPUT_VIDEO, pass_thru, TEMP_DIR)
     logger.info(f"Adjusted segments: {encode_adjusted_segments}, Original segments: {pass_thru}")
 
-    DEBUG = True
-    skip_encode = False
+    DEBUG = False
+    skip_encode = True
 
     if not skip_encode:
         logger.info(get_video_metadata(INPUT_VIDEO))
