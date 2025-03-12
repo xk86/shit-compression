@@ -169,9 +169,9 @@ def estimate_crf(codec: str, bitrate: int, resolution: tuple, fps: float) -> int
     # Assumption: scaled_score typically varies between -1.0 (excellent) and ~2.0 (poor)
     min_log, max_log = -1,1
     normalized_score = (scaled_score - min_log) / (max_log - min_log)
-    debug_print(f"{codec} Normalized score (pre-clamp): {normalized_score}", level=2)
+    #debug_print(f"{codec} Normalized score (pre-clamp): {normalized_score}", level=2)
     normalized_score = min(max(normalized_score, 0), 1)  # Clamp 0-1
-    debug_print(f"{codec} Normalized score: {normalized_score}", level=2)
+    #debug_print(f"{codec} Normalized score: {normalized_score}", level=2)
 
     min_crf, max_crf = codec_crf_range[codec]
 

@@ -29,21 +29,21 @@ TEMP_DIR = "temp_" + os.path.splitext(args.target_name)[0]
 #     {"start": 0, "end": 600, "interest": 0.5},
 # ]
 
-# The commented segments/quotes will be implicitly pass-through segments with interest 1.0
-disinterest_rate = 0.01
-BEE_SEGMENTS = [
-    {"start": 0, "end": 24, "interest": disinterest_rate},  # Speed up the boring dreamworks logo
-    # According to all known laws of aviation, there is no way a bee should be able to fly.
-    {"start": 34, "end": 1395, "interest": disinterest_rate},
-    # Do ya like jazz? - Plate crash
-    {"start": 1397, "end": 5442, "interest": disinterest_rate}, # The rest of the movie...
-]
-
-SHORTBEE = [
-  {"start": 11, "end": 23, "interest": 0.1},
-  {"start": 25, "end": 66, "interest": 0.1},
-
-]
+## The commented segments/quotes will be implicitly pass-through segments with interest 1.0
+#disinterest_rate = 0.01
+#BEE_SEGMENTS = [
+#    {"start": 0, "end": 24, "interest": disinterest_rate},  # Speed up the boring dreamworks logo
+#    # According to all known laws of aviation, there is no way a bee should be able to fly.
+#    {"start": 34, "end": 1395, "interest": disinterest_rate},
+#    # Do ya like jazz? - Plate crash
+#    {"start": 1397, "end": 5442, "interest": disinterest_rate}, # The rest of the movie...
+#]
+#
+#SHORTBEE = [
+#  {"start": 11, "end": 23, "interest": 0.1},
+#  {"start": 25, "end": 66, "interest": 0.1},
+#
+#]
 
 # Ensure temp directory exists
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -196,6 +196,7 @@ def split_video(input_file, segments, prefix):
     split_files = []
     
     debug_print(f"Splitting video {input_file} into segments:")
+    debug_print(segments)
 
     for i, seg in enumerate(segments):
         start, end = seg["start"], seg["end"]
@@ -224,7 +225,7 @@ def split_video(input_file, segments, prefix):
           print(f"FFmpeg stderr: {result.stderr}")
           raise RuntimeError(f"FFmpeg command failed with return code {result.returncode}")
 
-        debug_print(f"Segment {i} split: {full_output_path}")
+        debug_print(f"Segment {i} split {start} - {end}: {full_output_path}")
 
     return split_files
 
@@ -236,6 +237,10 @@ def add_pass_through_segments(segments, original_duration):
 
     for seg in segments:
         start, end, interest = seg["start"], seg["end"], seg["interest"]
+
+        # Adjust start to 0 if it's close to 0
+        if start < 1:
+            start = 0
 
         # Add pass-through segment if there is a gap between the previous end and the current start
         if start > previous_end:
@@ -249,6 +254,10 @@ def add_pass_through_segments(segments, original_duration):
         new_segments.append(seg)
         previous_end = end
 
+    # Adjust end to original_duration if it's close to original_duration
+    if previous_end > original_duration - 1:
+        previous_end = original_duration
+
     # Add pass-through segment if there is a gap between the last segment end and the original duration
     if previous_end < original_duration:
         new_segments.append({
@@ -256,20 +265,19 @@ def add_pass_through_segments(segments, original_duration):
             "end": original_duration,
             "interest": 1.0
         })
-
+    debug_print(f"New segments with pass-through: {new_segments}")
     return new_segments
 
 
 def encode_segments(segments_to_encode):
     """Encode (compress) the segments."""
     original_duration = get_video_duration(INPUT_VIDEO)
-    segments_with_pass_through = add_pass_through_segments(segments_to_encode, original_duration)
-    split_files = split_video(INPUT_VIDEO, segments_with_pass_through, "split")
+    split_files = split_video(INPUT_VIDEO, segments_to_encode, "split")
     compressed_segments = []
 
     print("Beginning encode pass\n", split_files)
 
-    for i, seg in enumerate(segments_with_pass_through):
+    for i, seg in enumerate(segments_to_encode):
         interest = seg["interest"]
 
         # Dynamically infer the filename extension
@@ -302,22 +310,23 @@ def encode_segments(segments_to_encode):
 
 def decode_segments(segments):
     """Decode (expand) the segments."""
-    original_duration = get_video_duration(INPUT_VIDEO)
+    #original_duration = get_video_duration(INPUT_VIDEO)
 
+    # This code is now done before calling this function
     # We need to adjust the segment times to first be relative to the compressed video.
     # Then we adjust those times to the closest keyframes.
-    segments_with_pass_through = add_pass_through_segments(segments, original_duration)
-    mutated_segments = get_mutated_segments(original_duration, segments_with_pass_through)
-    adjusted_segments = adjust_segments_to_keyframes(COMPRESSED_VIDEO, mutated_segments)
+    #segments_with_pass_through = add_pass_through_segments(segments, original_duration)
+    #mutated_segments = get_mutated_segments(original_duration, segments_with_pass_through)
+    #adjusted_segments = adjust_segments_to_keyframes(COMPRESSED_VIDEO, mutated_segments)
 
     #adjusted_segments = mutated_segments
-    split_files = split_video(COMPRESSED_VIDEO, adjusted_segments, "decode_pre")
+    split_files = split_video(COMPRESSED_VIDEO, segments, "decode_pre")
     restored_segments = []
 
     print("Beginning decode pass\n", split_files)
-    debug_print(f"Mutated segments: {mutated_segments}, Adjusted segments: {adjusted_segments}")
+    debug_print(f"Segments: {segments}")
 
-    for i, seg in enumerate(adjusted_segments):
+    for i, seg in enumerate(segments):
         interest = seg["interest"]
         expansion_factor = 1 / interest  # Decompression factor (to restore timing)
 
@@ -488,21 +497,22 @@ if __name__ == "__main__":
             {"start": 0, "end": 120, "interest": 0.5},
         ]
 
-    if INPUT_VIDEO == "bee_movie.mkv":
-        SEGMENTS = BEE_SEGMENTS
-    if INPUT_VIDEO == "SHORTBEE.mkv":
-        SEGMENTS = SHORTBEE
+#    if INPUT_VIDEO == "bee_movie.mkv":
+#        SEGMENTS = BEE_SEGMENTS
+#    if INPUT_VIDEO == "SHORTBEE.mkv":
+#        SEGMENTS = SHORTBEE
 
-    # Adjust segments to keyframes
-    adjusted_segments = adjust_segments_to_keyframes(INPUT_VIDEO, SEGMENTS)
-    print(f"Adjusted segments: {adjusted_segments}")
+    # Add pass-thru segments, then adjust segments to keyframes
+    pass_thru = add_pass_through_segments(SEGMENTS, original_duration)
+    encode_adjusted_segments = adjust_segments_to_keyframes(INPUT_VIDEO, pass_thru)
+    print(f"Adjusted segments: {encode_adjusted_segments}, Original segments: {pass_thru}")
 
     DEBUG = True
-    skip_encode = False #False
+    skip_encode = False#False
 
     if not skip_encode:
       print(get_video_metadata(INPUT_VIDEO))
-      compressed_segments = encode_segments(adjusted_segments)
+      compressed_segments = encode_segments(encode_adjusted_segments)
       # Write metadata file after encoding
       write_metadata_file(f"{os.path.splitext(INPUT_VIDEO)[0]}.mshit", original_duration, SEGMENTS)
     if skip_encode:
@@ -514,13 +524,22 @@ if __name__ == "__main__":
         # SHORTBEE dir: temp_SHEE
       #  compressed_segments = ["temp_SHEE/compressed_0.mkv", "temp_SHEE/compressed_1.mkv"]
 
-    estimated_compressed_duration = calculate_compressed_duration(original_duration, adjusted_segments)
+    estimated_compressed_duration = calculate_compressed_duration(original_duration, encode_adjusted_segments)
     print(f"Estimated compressed duration: {estimated_compressed_duration} seconds")
 
     ## Calculate estimated expanded duration based on compressed duration
-    estimated_expanded_duration = calculate_expanded_duration(estimated_compressed_duration, adjusted_segments)
+    estimated_expanded_duration = calculate_expanded_duration(estimated_compressed_duration, encode_adjusted_segments)
     print(f"Estimated expanded duration: {estimated_expanded_duration} seconds")
-    decode_segments(adjusted_segments)
+
+    # Rebase the original segments to be relative to the compressed video
+    compressed_duration = get_video_duration(COMPRESSED_VIDEO)
+    rebased_segments = get_mutated_segments(compressed_duration, SEGMENTS)
+    # Add pass thrus to the rebased segments
+    decode_pass_thru = add_pass_through_segments(rebased_segments, compressed_duration)
+    # Adjust the rebased segments to keyframes
+    decode_adjusted_segments = adjust_segments_to_keyframes(COMPRESSED_VIDEO, decode_pass_thru)
+    debug_print(f"Adjusted segments: {decode_adjusted_segments}, Original segments: {decode_pass_thru}")
+    decode_segments(decode_adjusted_segments)
 
     # For testing
     #concatenate_segments("temp/restored_list.txt", RESTORED_VIDEO, get_video_metadata(INPUT_VIDEO))
