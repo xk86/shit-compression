@@ -1,35 +1,33 @@
 import os
 import subprocess
 import shutil
+import argparse
 from sys import argv
-from lib import get_video_duration, get_video_metadata, get_audio_sample_rate
+from lib import get_video_duration, get_video_metadata, get_audio_sample_rate, get_bit_frame_rate, debug_print
+
+# Argument parsing
+parser = argparse.ArgumentParser(description="Scene Human Interest Temporal Compression")
+parser.add_argument("input_video", help="Input video file")
+parser.add_argument("target_name", help="Target name for output files")
+parser.add_argument("-t", "--metadata", help="Metadata file containing duration and scenes")
+args = parser.parse_args()
 
 # Define input/output filenames
-INPUT_VIDEO = argv[1]  # Changed from input.mp4
-COMPRESSED_VIDEO = "compressed_" + argv[2] 
-RESTORED_VIDEO = "restored_" + argv[2]
+INPUT_VIDEO = args.input_video
+COMPRESSED_VIDEO = "compressed_" + args.target_name
+RESTORED_VIDEO = "restored_" + args.target_name
 
 VIDEO_CODEC = "h264_videotoolbox"
 AUDIO_CODEC = "aac_at"
-#INPUT_VIDEO = "trailer_bee.webm"  # Changed from input.mp4
-#COMPRESSED_VIDEO = "compressed.webm"
-#RESTORED_VIDEO = "restored.webm"
+MINTERP = False
+
 # Split the extension from the filename
-TEMP_DIR = "temp_" + os.path.splitext(argv[2])[0]
+TEMP_DIR = "temp_" + os.path.splitext(args.target_name)[0]
 
 # Define segment times (adjust as needed)
-#SEGMENTS = [
-#    {"start": 0, "end": 60, "interest": 0.5},  # Speed up
-#    {"start": 60, "end": 90, "interest": 1.0}, # No speed change
-#    {"start": 90, "end": 120, "interest": 0.02}, # Extra boring. Stable for video, not stable for audio
-#    #{"start": 90, "end": 120, "interest": 1.2}, # This part is EXTRA interesting!
-#    {"start": 120, "end": 540, "interest": 0.3}  # Moderate speed-up
-#]
-
-# Skip the entire six minutes
-SEGMENTS = [
-    {"start": 0, "end": 600, "interest": 0.5},
-]
+# SEGMENTS = [
+#     {"start": 0, "end": 600, "interest": 0.5},
+# ]
 
 # The commented segments/quotes will be implicitly pass-through segments with interest 1.0
 disinterest_rate = 0.01
@@ -60,43 +58,60 @@ def process_segment(input_file, output_file, interest, mode="encode"):
     # The speed factor is the inverse of the interest value.
     # Some filters will take the speed factor as an argument, while others will take the interest value.
     # The filters will be inverse for the encode and decode passes.
+    debug_print(f"Processing segment {input_file} with interest {interest} in mode {mode}")
     speed_factor = 1
     speed_filter = ""
     target_framerate = 30
     base_audio_sample_rate = get_audio_sample_rate(input_file)
     source_audio_sr = get_audio_sample_rate(INPUT_VIDEO)
+    fr_cmd = []
     if mode == "encode":
       # For the encode pass, the interest will be <1, so speed_factor should be >1
       speed_factor = 1 / interest
 
-      target_framerate = get_video_metadata(input_file)["fps"] * speed_factor
+      #target_framerate = get_video_metadata(input_file)["fps"] * speed_factor
+      target_framerate = get_video_metadata(INPUT_VIDEO)["fps"]
       # Setpts is takes a frequency value, so we use interest.
       # We don't need to motion interpolate on the encode pass, as just increasing the output framerate will be enough, and faster.
       video_filter = f"[0:v]setpts={interest}*PTS[v]"
+
+      # Rubberband version is slower, and preserves the tempo (which isn't necessary, since we're going to slow it down later)
+      # It results in some very interesting decode artifacts.
       #audio_filter = f"[0:a]rubberband=tempo={speed_factor}[a]"
+
+      # asetrate version. Increases the sample rate, which speeds the audio up, and then resample down to the source sample rate.
       audio_filter = f"[0:a]asetrate={base_audio_sample_rate}*{speed_factor},aresample={source_audio_sr}[a]" # We can resample to super high quality for processing, but it can cause issues with scenes with interest of 1
+      fr_cmd = ["-r", str(target_framerate)]
 
       speed_filter = f"{video_filter};{audio_filter}"
-      #[0:a]asetrate=44100*{speed_factor}=async=1000 [a]"
-      
 
       # Atempo + asetrate
 
       #speed_filter = f"[0:v]minterpolate=fps={fps},minterpolate=mi_mode=blend[v];[0:a]rubberband=tempo={speed_factor}[a]"
+#    if mode == "encode_final":
+#      # Final encode pass where we're reencoding the concatenated segments.
+#      target_framerate = get_video_metadata(INPUT_VIDEO)["fps"]
+#      audio_filter = f"[0:a]aresample={base_audio_sample_rate}[a]"
+#      video_filter = f"[0:v]null[v]"
+#      speed_filter = f"{video_filter};{audio_filter}"
+
     if mode == "decode":
       # For the decode pass, the speed factor will be <1, so we will slow down the video.
       speed_factor = interest # Value to be used to slow down the video
       source_file_fps = get_video_metadata(INPUT_VIDEO)["fps"]
-      print(source_file_fps, target_framerate)
+      debug_print(source_file_fps, target_framerate)
       # Note that it's equal to the interest, it's already <1.
-      video_filter = f"[0:v]setpts={interest}*PTS[v]"
+      # Uncomment to use setpts instead of minterpolate, much faster, lower quality
+      if MINTERP:
+        video_filter = f"[0:v]minterpolate=fps={target_framerate},minterpolate=mi_mode=blend,setpts={interest}*PTS[v]"
+      else:
+        video_filter = f"[0:v]setpts={interest}*PTS[v]"
       audio_filter = f"[0:a]asetrate={base_audio_sample_rate}*{1/interest},aresample={source_audio_sr}[a]"
-      #speed_filter = f"[0:v]setpts={interest}*PTS[v];[0:a]rubberband=tempo={1/speed_factor}[a]"
-      speed_filter = f"{video_filter};{audio_filter}"
 
-      # Interpolation based filter isn't very good, is slow.
-      target_framerate = source_file_fps * 4 # for minterpolate
-      #speed_filter = f"[0:v]minterpolate=fps={target_framerate},minterpolate=mi_mode=blend,setpts={interest}*PTS[v];[0:a]rubberband=tempo={1/speed_factor}[a]"
+      # Interpolation based filter to reconstruct frames.
+      target_framerate = source_file_fps * speed_factor # for minterpolate
+      speed_filter = f"{video_filter};{audio_filter}"
+      fr_cmd = ["-r", str(target_framerate)]
 
     if mode == "decode-final":
       # Final decode pass where we're setting the framerate and audio sample rate back to normal.
@@ -104,9 +119,12 @@ def process_segment(input_file, output_file, interest, mode="encode"):
       target_framerate = get_video_metadata(INPUT_VIDEO)["fps"]
       audio_filter = f"[0:a]aresample={base_audio_sample_rate}[a]"
       speed_filter = f"[0:v]null[v];{audio_filter}"
+      fr_cmd = ["-r", str(target_framerate)]
 
     metadata = get_video_metadata(INPUT_VIDEO)
-    print(metadata)
+    debug_print(f"target framerate: {target_framerate}")
+    debug_print(metadata)
+    debug_print(f"source bfps {INPUT_VIDEO} {get_bit_frame_rate(INPUT_VIDEO)}\ntarget bfps {input_file} {get_bit_frame_rate(input_file)}")
 
     # If you use high speed intermediaries, there's not as much lost even if it gets dropped down to 30fps.
 
@@ -116,25 +134,27 @@ def process_segment(input_file, output_file, interest, mode="encode"):
         "-filter_complex", speed_filter, #f"[0:v]setpts={setpts_factor}*PTS[v];[0:a]rubberband=tempo={rubberband_factor}[a]",
         "-map", "[v]", "-map", "[a]",
         "-row-mt", "1",  # Enable multi-threading
-        "-c:v", VIDEO_CODEC,  # Change to a faster video codec
+        "-c:v", metadata["vcodec"],  # Change to a faster video codec
         #"-crf", str(metadata["vcrf"]),  # Adjust quality here
-        "-q:v", str(metadata["vcrf"]), # Value 0-100, 0 is worse, 100 is best for apple
-        #"-c:a", AUDIO_CODEC,  # Change to a faster audio codec (using default for testing)
-        #"-q:a", "7", # 0-14
+        "-b:v", str(get_bit_frame_rate(INPUT_VIDEO) * target_framerate),  # Adjust bitrate here
+        #"-q:v", str(metadata["vcrf"]), # Value 0-100, 0 is worse, 100 is best (h264_videotoolbox)
+        "-c:a", metadata["acodec"],  # Change to a faster audio codec (using default for testing)
+        "-b:a", str(metadata["abitrate"]),  # Adjust audio bitrate here
+        #"-q:a", str(metadata["acrf"]), # 0-14
         #"-ar", "128000",
         "-fflags", "+genpts",
         "-avoid_negative_ts", "make_zero",
-        #"-r", str(target_framerate),  # Set the output framerate
+        *fr_cmd,
         "-f", "matroska",
         output_file
     ]
 
-    print(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
+    debug_print(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
     result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     if result.returncode != 0:
       print(f"FFmpeg stdout: {result.stdout}")
-      print(f"FFmpeg stderr: {result.stderr}")
+      #print(f"FFmpeg stderr: {result.stderr}")
       raise RuntimeError(f"FFmpeg command failed with return code {result.returncode}")
 
 
@@ -143,14 +163,19 @@ def concatenate_segments(file_list_path, output_file, metadata):
     print(f"Concatenating segments in {file_list_path} into {output_file}")
     result = subprocess.run([
         "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", file_list_path,
-        "-c", "copy",  # Copy codec to avoid re-encoding
+        "-c:v", "copy",  # Copy codec to avoid re-encoding
+        "-c:a", "copy",
+        #"-c:a", metadata["acodec"],  
+        #"-af", "[0:a]concat=n=1:v=0:a=1[a]",  # Concatenate audio streams
         "-fflags", "+genpts",
         "-avoid_negative_ts", "make_zero",
+        "-reset_timestamps", "1",
+        #"-copyts",
         "-r", str(metadata["fps"]),  # Set the output framerate
         "-f", "matroska", output_file
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-    print(f"FFmpeg stdout: {result.stdout}")
-    print(f"FFmpeg stderr: {result.stderr}")
+    #print(f"FFmpeg stdout: {result.stdout}")
+    #print(f"FFmpeg stderr: {result.stderr}")
 
     if result.returncode != 0:
       print(f"FFmpeg stdout: {result.stdout}")
@@ -169,6 +194,8 @@ def write_file_list(file_list_path, segment_filenames):
 def split_video(input_file, segments, prefix):
     """Losslessly split the video file into segments based on the given segment interests."""
     split_files = []
+    
+    debug_print(f"Splitting video {input_file} into segments:")
 
     for i, seg in enumerate(segments):
         start, end = seg["start"], seg["end"]
@@ -180,24 +207,24 @@ def split_video(input_file, segments, prefix):
         ffmpeg_cmd = [
             "ffmpeg", "-y",
             "-i", input_file,
-            "-ss", str(start), "-to", str(end),
-            "-c:v", "copy",  # Copy video codec to avoid re-encoding
-            "-c:a", "copy",  # Copy audio codec to avoid re-encoding
+            "-ss", str(start), 
+            "-t", str(duration),
+            "-c", "copy",
             "-reset_timestamps", "1",
             "-fflags", "+genpts",
             "-avoid_negative_ts", "make_zero",
             "-f", "matroska", full_output_path  # Use .mkv format
         ]
 
-        print(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
+        debug_print(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
         result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
         if result.returncode != 0:
-            print(f"FFmpeg stdout: {result.stdout}")
-            print(f"FFmpeg stderr: {result.stderr}")
-            raise RuntimeError(f"FFmpeg command failed with return code {result.returncode}")
+          print(f"FFmpeg stdout: {result.stdout}")
+          print(f"FFmpeg stderr: {result.stderr}")
+          raise RuntimeError(f"FFmpeg command failed with return code {result.returncode}")
 
-        print(f"Segment {i} split: {full_output_path}")
+        debug_print(f"Segment {i} split: {full_output_path}")
 
     return split_files
 
@@ -273,17 +300,24 @@ def encode_segments(segments_to_encode):
     return compressed_segments
 
 
-def decode_segments(compressed_segments):
+def decode_segments(segments):
     """Decode (expand) the segments."""
     original_duration = get_video_duration(INPUT_VIDEO)
-    segments_with_pass_through = add_pass_through_segments(compressed_segments, original_duration)
+
+    # We need to adjust the segment times to first be relative to the compressed video.
+    # Then we adjust those times to the closest keyframes.
+    segments_with_pass_through = add_pass_through_segments(segments, original_duration)
     mutated_segments = get_mutated_segments(original_duration, segments_with_pass_through)
-    split_files = split_video(COMPRESSED_VIDEO, mutated_segments, "decode_pre")
+    adjusted_segments = adjust_segments_to_keyframes(COMPRESSED_VIDEO, mutated_segments)
+
+    #adjusted_segments = mutated_segments
+    split_files = split_video(COMPRESSED_VIDEO, adjusted_segments, "decode_pre")
     restored_segments = []
 
     print("Beginning decode pass\n", split_files)
+    debug_print(f"Mutated segments: {mutated_segments}, Adjusted segments: {adjusted_segments}")
 
-    for i, seg in enumerate(mutated_segments):
+    for i, seg in enumerate(adjusted_segments):
         interest = seg["interest"]
         expansion_factor = 1 / interest  # Decompression factor (to restore timing)
 
@@ -296,9 +330,9 @@ def decode_segments(compressed_segments):
         if interest == 1.0:
             # Skip processing and use the raw split file
             shutil.copy(split_files[i], full_restored_path)
-            print(f"Skipping processing for segment {i} with interest {interest}. Using raw split file.")
+            debug_print(f"Skipping processing for segment {i} with interest {interest}. Using raw split file.")
         else:
-            print(f"Processing segment {i} with expansion factor {expansion_factor}. Saving to file {full_restored_path}")
+            debug_print(f"Processing segment {i} with expansion factor {expansion_factor}. Saving to file {full_restored_path}")
             process_segment(split_files[i], full_restored_path, expansion_factor, mode="decode")
 
         compressed_duration = get_video_duration(split_files[i])
@@ -384,6 +418,7 @@ def get_mutated_segments(original_duration, segments):
             "interest": 1.0
         })
 
+    debug_print(f"Mutated segments: {mutated_segments}")
     return mutated_segments
 
 def adjust_segments_to_keyframes(input_file, segments):
@@ -428,9 +463,30 @@ def adjust_segments_to_keyframes(input_file, segments):
     
     return adjusted_segments
 
+def write_metadata_file(metadata_file, duration, segments):
+    """Write the video metadata to a file."""
+    metadata = {
+        "duration": duration,
+        "segments": segments
+    }
+    with open(metadata_file, "w") as f:
+        f.write(str(metadata))
+
 if __name__ == "__main__":
     original_duration = get_video_duration(INPUT_VIDEO)
     print(f"Original file length: {original_duration} seconds")
+
+    metadata_file = args.metadata if args.metadata else f"{os.path.splitext(INPUT_VIDEO)[0]}.mshit"
+
+    if args.metadata:
+        with open(metadata_file, "r") as f:
+            metadata = eval(f.read())
+            original_duration = metadata["duration"]
+            SEGMENTS = metadata["segments"]
+    else:
+        SEGMENTS = [
+            {"start": 0, "end": 120, "interest": 0.5},
+        ]
 
     if INPUT_VIDEO == "bee_movie.mkv":
         SEGMENTS = BEE_SEGMENTS
@@ -441,25 +497,22 @@ if __name__ == "__main__":
     adjusted_segments = adjust_segments_to_keyframes(INPUT_VIDEO, SEGMENTS)
     print(f"Adjusted segments: {adjusted_segments}")
 
-    # Test the split_video function
-    #split_files = split_video(INPUT_VIDEO, adjusted_segments, "test_split")
-    #print("Split files:", split_files)
-
-    # Debug print the passed-through segments
-    #print(f"Segments with pass-through: {add_pass_through_segments(adjusted_segments, original_duration)}")
-
-    skip_encode = False
+    DEBUG = True
+    skip_encode = False #False
 
     if not skip_encode:
-      ## Comment out the encode/decode calls for now
       print(get_video_metadata(INPUT_VIDEO))
       compressed_segments = encode_segments(adjusted_segments)
+      # Write metadata file after encoding
+      write_metadata_file(f"{os.path.splitext(INPUT_VIDEO)[0]}.mshit", original_duration, SEGMENTS)
     if skip_encode:
       pass
-      #compressed_segments = ["temp_hip/compressed_0.mkv", "temp_hip/compressed_1.mkv", "temp_hip/compressed_2.mkv", "temp_hip/compressed_3.mkv", "temp_hip/compressed_4.mkv", "temp_hip/compressed_5.mkv"]
-      compressed_segments = ["temp_trail/compressed_0.mkv", "temp_trail/compressed_1.mkv", "temp_trail/compressed_2.mkv", "temp_trail/compressed_3.mkv"]
+      #compresed_segments = [TEMP_DIR + "/compressed_" + str(i) + ".mkv" for i in range(len(SEGMENTS))]
+        #compressed_segments = ["temp_hip/compressed_0.mkv", "temp_hip/compressed_1.mkv", "temp_hip/compressed_2.mkv", "temp_hip/compressed_3.mkv", "temp_hip/compressed_4.mkv", "temp_hip/compressed_5.mkv"]
+        #compressed_segments = ["temp_trail/compressed_0.mkv", "temp_trail/compressed_1.mkv", "temp_trail/compressed_2.mkv", "temp_trail/compressed_3.mkv"]
 
-
+        # SHORTBEE dir: temp_SHEE
+      #  compressed_segments = ["temp_SHEE/compressed_0.mkv", "temp_SHEE/compressed_1.mkv"]
 
     estimated_compressed_duration = calculate_compressed_duration(original_duration, adjusted_segments)
     print(f"Estimated compressed duration: {estimated_compressed_duration} seconds")
