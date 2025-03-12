@@ -1,15 +1,18 @@
-# Scene Human Interest Temporal Compression (SHIT Compression)
+# Scene Human Interest Temporal (SHIT) Compression
 
 ## Concept
 Scene Human Interest Temporal (SHIT) compression is a novel(?) form of compression that aims to compress audio/video files by compressing scenes based on how "interesting" they are to a human viewer.
-Scenes that have low interest can be sped up, resulting in a file that, if compressed properly, should be smaller both in filesize, and in watch/listen time.
+Scenes that have low interest can be sped up, resulting in a file that, if transcoded with similar settings, should be smaller both in filesize, and in watch/listen time.
 The intended goal of this project was initially to compress a movie down to only a few scenes, while still retaining enough information to reconstruct some crude approximation of the source.
 Initial testing and design was made for increasing losses on reconstruction, for aesthetic purposes, though the method does seem to work pretty well with mild interest values (0.5-<1).
 Tuning and optimizing the compression settings during the transcoding/processing is important, as it's possible to inflate the file on compression.
 
+"Interest" values are currently manually defined, however, there are plenty of heuristics that could be created for determining them, especially if compute power is not a concern.
 ## Current Implementation
 Things are very much a work-in-progress. It's currently platform-specific (hardcoded macos codecs), but it uses ffmpeg on the backend, so with some very minor tweaks, it should be able to work anywhere.
-I had ChatGPT make the first rough draft codebase as a proof-of-concept, but have since manually rewritten most of it.
+I had ChatGPT make the first rough draft codebase as a proof-of-concept, but have since manually rewritten most of it. (Turns out, hallucinated code only goes so far)
+The current version is not working, but thats okay.
+Also several glaringly incorrect things.
 Expect things to be rough around the edges, as many things aren't working properly at the moment, and a lot remains to be implemented- even this readme isn't fini
 
 Making the timings work and align is quite difficult.
@@ -36,7 +39,7 @@ The reference "codec" is a wrapper around several ffmpeg commands that:
     2. Split the file up at those points, along the keyframes.
     3. For each of the split up scenes:
       1. If the scene has an interest value of 1, we don't touch it.
-      2. Otherwise, apply the effect filter for the decode/encode pass to speed up/slow down the scene by the interest factor we got from metadata (or computed, for decode).
+       2. Otherwise, apply the effect filter for the decode/encode pass to speed up/slow down the scene by the interest factor we got from metadata (or computed, for decode).
         - For the encode pass:
           - Note that just because something is theoretically lossless under processing does not mean the final compressed video (and resulting restored video) will be lossless. That is just in reference to how much gets lost between this step, and step 4, as a result of the processing. This algorithm will always fundamentally be lossy, regardless of processing technique.
           - Video: 
@@ -46,7 +49,7 @@ The reference "codec" is a wrapper around several ffmpeg commands that:
             - Upsampling (Fast, theoretically lossless during processing\*, though not in implementation): 
               Multiplying the audio sample rate of the original video by 1/interest, and resampling the audio to be compatible with the codec will work here. 
               \*Probably possible to use really high sample rates during intermediate processing, then do a two-pass encode that resamples down, to minimize excessive loss.
-            - Rubberband (Slow, not really necessary, but funny, very lossy):
+            - Rubberband (Slow, very lossy at extreme values, but preserves pitch):
               Uses `librubberband` via ffmpeg's `rubberband` filter to compress the time of the audio. Not really noticeable on the encode.
         - For the decode pass:
           - Video: 
