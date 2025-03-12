@@ -6,7 +6,7 @@ import logging
 from fileops import *
 from meta import *
 from sys import argv
-from lib import get_video_duration, get_video_metadata, get_audio_sample_rate, get_bit_frame_rate
+from avmeta import get_video_duration, get_video_metadata, get_audio_sample_rate, get_bit_frame_rate
 import colorlog
 
 # Set up logging
