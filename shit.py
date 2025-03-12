@@ -171,10 +171,10 @@ def process_segment(input_file, output_file, interest, mode="encode", segments=[
 
     logger.info(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
     result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    logger.debug(f"FFmpeg stdout: {result.stdout}")
-    logger.debug(f"FFmpeg stderr: {result.stderr}")
 
     if result.returncode != 0:
+        logger.debug(f"FFmpeg stdout: {result.stdout}")
+        logger.debug(f"FFmpeg stderr: {result.stderr}")
         raise RuntimeError(f"FFmpeg command failed with return code {result.returncode}")
 
 
