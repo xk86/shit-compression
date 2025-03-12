@@ -5,14 +5,9 @@ from platform import system
 import warnings
 from typing import List
 from mdtypes import EssentialMetadataDict, FilterDict
+import logging
 
-DEBUG = True
-DEBUG_LEVEL = 2
-
-def debug_print(msg: str, *args, level: int = 1):
-  if DEBUG:
-    print(msg, *args)
-
+logger = logging.getLogger(__name__)
 
 def get_video_duration(input_file: str) -> float:
     result = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", input_file], stdout=subprocess.PIPE, text=True, check=True)
@@ -40,7 +35,7 @@ def get_bit_rate(input_file: str, type: str = "video") -> float:
             stdout=subprocess.PIPE, text=True, check=True
         ).stdout.strip().split(',')
     except subprocess.CalledProcessError:
-        print("Error getting bitrate from metadata")
+        logger.error("Error getting bitrate from metadata")
         metadata_check_br = ["N/A"]
 
     if metadata_check_br[0] != "N/A":
@@ -80,7 +75,7 @@ def get_video_metadata(input_file: str) -> EssentialMetadataDict:
   format_result = format_output.split(',') if format_output else []
 #
 #    if format_result[0] == "N/A":
-#      print(video_size)
+#      #print(video_size)
 
   vcodec = video_result[0] if len(video_result) > 0 else "h264"
   width = int(video_result[1]) if len(video_result) > 1 and video_result[1].isdigit() else 1920
@@ -156,22 +151,22 @@ def estimate_crf(codec: str, bitrate: int, resolution: tuple, fps: float) -> int
     #quality_score = (bitrate / (pixels * fps))  # bits per pixel-frame
     quality_score = (pixels * fps) / bitrate  # Higher means lower quality (fewer bits per pixel-frame)
 
-    #print(f"{codec} Quality score: {quality_score}")
+    #logger.debug(f"{codec} Quality score: {quality_score}")
     #if not audio:
-    #  print(f"{codec} Resolution: {resolution}, Bitrate: {bitrate}, FPS: {fps}")
+    #  logger.debug(f"{codec} Resolution: {resolution}, Bitrate: {bitrate}, FPS: {fps}")
 
     # Apply logarithmic scaling to distribute values evenly
     scaled_score = math.log1p(quality_score)
 
-    #print(f"{codec} Scaled score: {scaled_score}")
+    #logger.debug(f"{codec} Scaled score: {scaled_score}")
 
     # Normalize scaled score between 0 and 1 based on practical observed ranges
     # Assumption: scaled_score typically varies between -1.0 (excellent) and ~2.0 (poor)
     min_log, max_log = -1,1
     normalized_score = (scaled_score - min_log) / (max_log - min_log)
-    #debug_print(f"{codec} Normalized score (pre-clamp): {normalized_score}", level=2)
+    #logger.debug(f"{codec} Normalized score (pre-clamp): {normalized_score}", level=2)
     normalized_score = min(max(normalized_score, 0), 1)  # Clamp 0-1
-    #debug_print(f"{codec} Normalized score: {normalized_score}", level=2)
+    #logger.debug(f"{codec} Normalized score: {normalized_score}", level=2)
 
     min_crf, max_crf = codec_crf_range[codec]
 
@@ -227,6 +222,6 @@ def verify_decoded_duration(output_file: str, expected_duration: float):
         ValueError: If the actual duration does not match the expected duration.
     """
     actual_duration = get_video_duration(output_file)
-    print(f"Verifying decoded duration: expected={expected_duration}, actual={actual_duration}, file={output_file}")
+    logger.info(f"Verifying decoded duration: expected={expected_duration}, actual={actual_duration}, file={output_file}")
     if not math.isclose(actual_duration, expected_duration, rel_tol=0.01):
         raise ValueError(f"Decoded duration mismatch: expected {expected_duration}, got {actual_duration}")
