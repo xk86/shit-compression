@@ -1,4 +1,4 @@
-# Scene Human Interest Temporal Compression (SHIT Compression)
+# Scene Human Interest Temporal (SHIT) Compression
 
 ## Concept
 Scene Human Interest Temporal (SHIT) compression is a novel(?) form of compression that aims to compress audio/video files by compressing scenes based on how "interesting" they are to a human viewer.
@@ -7,9 +7,12 @@ The intended goal of this project was initially to compress a movie down to only
 Initial testing and design was made for increasing losses on reconstruction, for aesthetic purposes, though the method does seem to work pretty well with mild interest values (0.5-<1).
 Tuning and optimizing the compression settings during the transcoding/processing is important, as it's possible to inflate the file on compression.
 
+"Interest" values are currently manually defined, however, there are plenty of heuristics that could be created for determining them, especially if compute power is not a concern.
 ## Current Implementation
 Things are very much a work-in-progress. It's currently platform-specific (hardcoded macos codecs), but it uses ffmpeg on the backend, so with some very minor tweaks, it should be able to work anywhere.
 I had ChatGPT make the first rough draft codebase as a proof-of-concept, but have since manually rewritten most of it. (Turns out, hallucinated code only goes so far)
+The current version is not working, but thats okay.
+Also several glaringly incorrect things.
 Expect things to be rough around the edges, as many things aren't working properly at the moment, and a lot remains to be implemented- even this readme isn't fini
 
 Making the timings work and align is quite difficult.
