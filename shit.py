@@ -12,14 +12,24 @@ RESTORED_VIDEO = "restored_" + argv[2]
 #COMPRESSED_VIDEO = "compressed.webm"
 #RESTORED_VIDEO = "restored.webm"
 # Split the extension from the filename
-TEMP_DIR = "temp_" + os.path.splitext(INPUT_VIDEO)[0]
+TEMP_DIR = "temp_" + os.path.splitext(argv[2])[0]
 
 # Define segment times (adjust as needed)
 SEGMENTS = [
     {"start": 0, "end": 60, "interest": 0.5},  # Speed up
     {"start": 60, "end": 90, "interest": 1.0}, # No speed change
-    {"start": 90, "end": 120, "interest": 1.2}, # This part is EXTRA interesting!
+    {"start": 90, "end": 120, "interest": 0.02}, # Extra boring. Stable for video, not stable for audio
+    #{"start": 90, "end": 120, "interest": 1.2}, # This part is EXTRA interesting!
     {"start": 120, "end": 540, "interest": 0.3}  # Moderate speed-up
+]
+
+# The commented segments/quotes will be implicitly pass-through segments with interest 1.0
+BEE_SEGMENTS = [
+    {"start": 0, "end": 24, "interest": 0.1},  # Speed up the boring dreamworks logo
+    # According to all known laws of aviation, there is no way a bee should be able to fly.
+    {"start": 45, "end": 1395, "interest": 0.1},
+    # Do ya like jazz? - Plate crash
+    {"start": 1404, "end": 5442, "interest": 0.1}, # The rest of the movie...
 ]
 
 # Ensure temp directory exists
@@ -37,9 +47,12 @@ def process_segment(input_file, output_file, interest, mode="encode"):
     # The filters will be inverse for the encode and decode passes.
     speed_factor = 1
     speed_filter = ""
+    target_framerate = 30
     if mode == "encode":
       # For the encode pass, the interest will be <1, so speed_factor should be >1
       speed_factor = 1 / interest
+
+      target_framerate = get_video_metadata(INPUT_VIDEO)["fps"] * speed_factor
       # Setpts is takes a frequency value, so we use interest.
       # We don't need to motion interpolate on the encode pass, as just increasing the output framerate will be enough, and faster.
       speed_filter = f"[0:v]setpts={interest}*PTS[v];[0:a]rubberband=tempo={speed_factor}[a]"
@@ -49,11 +62,18 @@ def process_segment(input_file, output_file, interest, mode="encode"):
       # For the decode pass, the speed factor will be <1, so we will slow down the video.
       speed_factor = interest # Value to be used to slow down the video
       source_file_fps = get_video_metadata(INPUT_VIDEO)["fps"]
+      target_framerate = source_file_fps 
+      print(source_file_fps, target_framerate)
       # Note that it's equal to the interest, it's already <1.
-      speed_filter = f"[0:v]minterpolate=fps={source_file_fps},minterpolate=mi_mode=blend[v];[0:a]rubberband=tempo={1/speed_factor}[a]"
+      speed_filter = f"[0:v]setpts={interest}*PTS[v];[0:a]rubberband=tempo={1/speed_factor}[a]"
+
+      # Interpolation based filter isn't very good, is slow.
+      #speed_filter = f"[0:v]minterpolate=fps={target_framerate},minterpolate=mi_mode=blend,setpts={interest}*PTS[v];[0:a]rubberband=tempo={1/speed_factor}[a]"
 
     metadata = get_video_metadata(INPUT_VIDEO)
     print(metadata)
+
+    # If you use high speed intermediaries, there's not as much lost even if it gets dropped down to 30fps.
 
     ffmpeg_cmd = [
         "ffmpeg", "-y",
@@ -63,20 +83,24 @@ def process_segment(input_file, output_file, interest, mode="encode"):
         "-row-mt", "1",  # Enable multi-threading
         "-c:v", "libvpx-vp9",  # Change to a faster video codec
         "-crf", str(metadata["vcrf"]),  # Adjust quality here
+        "-b:v", str(metadata["vbitrate"]),  # Adjust video bitrate here
         "-b:a", str(metadata["abitrate"]),  # Adjust audio bitrate here
+        #set sample rate higher for processing
+        "-ar", "128000",
         "-c:a", "libopus",  # Change to a faster audio codec
         "-fflags", "+genpts",
         "-avoid_negative_ts", "make_zero",
+        "-r", str(target_framerate),  # Set the output framerate
         "-f", "webm",
         output_file
     ]
 
     print(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
     result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    print(f"FFmpeg stdout: {result.stdout}")
+    print(f"FFmpeg stderr: {result.stderr}")
 
     if result.returncode != 0:
-        print(f"FFmpeg stdout: {result.stdout}")
-        print(f"FFmpeg stderr: {result.stderr}")
         raise RuntimeError(f"FFmpeg command failed with return code {result.returncode}")
 
 
@@ -87,7 +111,9 @@ def concatenate_segments(file_list_path, output_file, metadata):
         "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", file_list_path,
         "-c", "copy",  # Copy codec to avoid re-encoding
         "-fflags", "+genpts",
+        "-ar", "48000",
         "-avoid_negative_ts", "make_zero",
+        "-r", str(metadata["fps"]),  # Set the output framerate
         "-f", "webm", output_file
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
 
@@ -379,11 +405,10 @@ if __name__ == "__main__":
       print(get_video_metadata(INPUT_VIDEO))
       compressed_segments = encode_segments(adjusted_segments)
     if skip_encode:
-      compressed_segments = ["temp_trailer_bee/split_0.webm", "temp_trailer_bee/split_1.webm", "temp_trailer_bee/split_2.webm", "temp_trailer_bee/split_3.webm"]
+      pass
+      #compressed_segments = ["temp_trailer_bee/compressed_0.webm", "temp_trailer_bee/compressed_1.webm", "temp_trailer_bee/compressed_2.webm", "temp_trailer_bee/compressed_3.webm"]
 
 
-    ## Hardcoded compressed segments for testing
-    #concatenate_segments("temp/compressed_list.txt", COMPRESSED_VIDEO, get_video_metadata(INPUT_VIDEO))
 
     estimated_compressed_duration = calculate_compressed_duration(original_duration, adjusted_segments)
     print(f"Estimated compressed duration: {estimated_compressed_duration} seconds")
