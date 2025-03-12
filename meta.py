@@ -1,8 +1,6 @@
 import os
 import subprocess
-import logging
-
-logger = logging.getLogger(__name__)
+from logging_config import logger
 
 def add_pass_through_segments(segments, original_duration):
     """Add pass-through segments with intensity 1 between the given segments."""

@@ -5,17 +5,28 @@ from platform import system
 import warnings
 from typing import List
 from mdtypes import EssentialMetadataDict, FilterDict
-import logging
-
-logger = logging.getLogger(__name__)
+from logging_config import logger
 
 def get_video_duration(input_file: str) -> float:
     result = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", input_file], stdout=subprocess.PIPE, text=True, check=True)
     return float(result.stdout.strip())
 
-def get_audio_sample_rate(input_file: str) ->float:
-    result = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=sample_rate", "-of", "csv=p=0", input_file], stdout=subprocess.PIPE, text=True, check=True)
-    return float(result.stdout.strip())
+def get_audio_sample_rate(input_file: str) -> float:
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=sample_rate", "-of", "csv=p=0", input_file],
+            stdout=subprocess.PIPE, text=True, check=True
+        )
+        sample_rate = result.stdout.strip()
+        if not sample_rate:
+            raise ValueError("No audio stream found")
+        return float(sample_rate)
+    except subprocess.CalledProcessError as e:
+        logger.error(f"ffprobe error: {e}")
+        raise
+    except ValueError as e:
+        logger.warning(f"Audio sample rate error: {e}")
+        return 0.0
 
 def get_bit_rate(input_file: str, type: str = "video") -> float:
     """Gets or estimates video/audio bitrate from a file.
@@ -39,6 +50,8 @@ def get_bit_rate(input_file: str, type: str = "video") -> float:
         metadata_check_br = ["N/A"]
 
     if metadata_check_br[0] != "N/A":
+        if metadata_check_br[0] == "":
+            return 1
         return int(metadata_check_br[0])
 
     # Bitrate wasn't stored in the metadata, so we calculate it

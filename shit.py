@@ -2,29 +2,11 @@ import os
 import subprocess
 import shutil
 import argparse
-import logging
 from fileops import *
 from meta import *
 from sys import argv
 from avmeta import get_video_duration, get_video_metadata, get_audio_sample_rate, get_bit_frame_rate
-import colorlog
-
-# Set up logging
-logger = colorlog.getLogger(__name__)
-if not logger.hasHandlers():
-  handler = colorlog.StreamHandler()
-  handler.setFormatter(colorlog.ColoredFormatter(
-      '%(light_black)s%(asctime)s%(reset)s %(log_color)s%(levelname)s%(reset)s-%(purple)s%(funcName)s%(reset)s: %(message)s',
-      log_colors={
-          'DEBUG': 'cyan',
-          'INFO': 'green',
-          'WARNING': 'yellow',
-          'ERROR': 'red',
-          'CRITICAL': 'red,bg_white',
-      }
-  ))
-  logger.addHandler(handler)
-  logger.setLevel(logging.DEBUG)
+from logging_config import logger
 
 # Argument parsing
 parser = argparse.ArgumentParser(description="Scene Human Interest Temporal Compression")
