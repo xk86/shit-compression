@@ -1,6 +1,8 @@
 import os
 import subprocess
 from logging_config import logger
+from avmeta import get_video_duration
+from math import isclose
 
 def add_pass_through_segments(segments, original_duration):
     """Add pass-through segments with intensity 1 between the given segments."""
@@ -80,15 +82,16 @@ def calculate_expanded_duration(compressed_duration, segments):
     return expanded_duration
 
 
-def get_mutated_segments(original_duration, segments):
+def get_mutated_segments(segments):
     """Return a list of mutated segments relative to the times in the compressed video."""
     mutated_segments = []
     current_time = 0
 
-    for seg in segments:
+    for i, seg in enumerate(segments):
         start, end, interest = seg["start"], seg["end"], seg["interest"]
         segment_duration = end - start
         compressed_segment_duration = segment_duration * interest
+        logger.debug(f"Time: {current_time} segment {i} segment_duration: {segment_duration}, * {interest} = {compressed_segment_duration}")
 
         mutated_segments.append({
             "start": current_time,
@@ -98,23 +101,25 @@ def get_mutated_segments(original_duration, segments):
 
         current_time += compressed_segment_duration
 
-    # Add the remaining duration as a single segment if there is any
-    total_segment_duration = sum(seg["end"] - seg["start"] for seg in segments)
-    non_segment_duration = original_duration - total_segment_duration
-    if non_segment_duration > 0:
-        mutated_segments.append({
-            "start": current_time,
-            "end": current_time + non_segment_duration,
-            "interest": 1.0
-        })
+    ## Add the remaining duration as a single segment if there is any
+    #total_segment_duration = sum(seg["end"] - seg["start"] for seg in segments)
+    #non_segment_duration = original_duration - total_segment_duration
+    #if non_segment_duration > 0:
+    #    mutated_segments.append({
+    #        "start": current_time,
+    #        "end": current_time + non_segment_duration,
+    #        "interest": 1.0
+    #    })
 
-    logger.debug(f"Mutated segments: {mutated_segments}")
+    logger.info(f"Mutated segments: {mutated_segments}")
     return mutated_segments
 
 
 def adjust_segments_to_keyframes(input_file, segments, temp_dir):
     """Adjust segment times to the closest keyframes."""
-    keyframes_file = os.path.join(temp_dir, "keyframes.txt")
+    keyframes_file = os.path.join(temp_dir, f"{os.path.splitext(input_file)[0]}_keyframes.txt")
+    original_duration = get_video_duration(input_file)
+    logger.debug(f"Adjusting segments {segments} for {input_file}")
     
     # Run ffprobe to get keyframes
     ffprobe_cmd = [
@@ -122,6 +127,7 @@ def adjust_segments_to_keyframes(input_file, segments, temp_dir):
         "-show_packets", "-show_entries", "packet=pts_time,flags", "-of", "csv"
     ]
     
+    logger.debug(f"Loading keyframes from {keyframes_file}")
     with open(keyframes_file, "w") as f:
         result = subprocess.run(ffprobe_cmd, stdout=f, stderr=subprocess.PIPE, text=True)
     
@@ -147,10 +153,20 @@ def adjust_segments_to_keyframes(input_file, segments, temp_dir):
     
     # Adjust segments to the closest keyframes
     adjusted_segments = []
-    for seg in segments:
+    for i, seg in enumerate(segments):
         start = min(keyframes, key=lambda k: abs(k - seg["start"]))
         end = min(keyframes, key=lambda k: abs(k - seg["end"]))
+        # If the first or last segment is close to the start/end of the file, set its start/end to the file boundary.
+        if i == len(segments) - 1:
+            if isclose(end, original_duration, rel_tol=0.1):
+                end = original_duration
+        elif i == 0:
+            if isclose(start, 0.0, rel_tol=0.1):
+                start = 0.0
+        logger.debug(f"Found adjusted keyframe for segment {i}: {start} {end}")
         adjusted_segments.append({"start": start, "end": end, "interest": seg["interest"]})
+    
+    logger.debug(f"Adjusted keyframes for {input_file}: {adjusted_segments}")
     
     return adjusted_segments
 

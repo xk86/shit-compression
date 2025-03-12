@@ -52,7 +52,7 @@ TEMP_DIR = "temp_" + os.path.splitext(args.target_name)[0]
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 
-def process_segment(input_file, output_file, interest, mode="encode"):
+def process_segment(input_file, output_file, interest, mode="encode", segments=[]):
     """Process a video segment by encoding (speed-up) or decoding (slow-down)."""
     logger.debug(f"Processing segment {input_file} with interest {interest} in mode {mode}")
     # Interest is how interersted we are in a segment.
@@ -131,10 +131,11 @@ def process_segment(input_file, output_file, interest, mode="encode"):
       target_framerate = get_video_metadata(INPUT_VIDEO)["fps"]
       audio_filter = f"[0:a]aresample={base_audio_sample_rate}[a]"
       video_filter = f"{vf_head}"
+     
       
       video_filter += f"null"
 
-      fr_cmd = ["-r", str(target_framerate)]
+      fr_cmd = ["-r", str(target_framerate),]
 
     metadata = get_video_metadata(INPUT_VIDEO)
     logger.debug(f"target framerate: {target_framerate}")
@@ -177,10 +178,12 @@ def process_segment(input_file, output_file, interest, mode="encode"):
         raise RuntimeError(f"FFmpeg command failed with return code {result.returncode}")
 
 
-def concatenate_segments(file_list_path, output_file, metadata):
+def concatenate_segments(file_list_path, output_file, metadata, segments=[]):
     """Concatenate processed segments into a final video file without re-encoding."""
     logger.info(f"Concatenating segments in {file_list_path} into {output_file}")
-    result = subprocess.run([
+    new_kfs = ",".join([str(seg['end']) for seg in segments])
+    logger.debug(f"Forcing keyframes {new_kfs}")
+    ffmpeg_cmd = [
         "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", file_list_path,
         "-c", "copy",  # Copy codec to avoid re-encoding
         #"-c:a", metadata["acodec"],  
@@ -188,10 +191,14 @@ def concatenate_segments(file_list_path, output_file, metadata):
         "-fflags", "+genpts",
         "-avoid_negative_ts", "make_zero",
         "-reset_timestamps", "1",
-        #"-copyts",
+        "-copyts",
         "-r", str(metadata["fps"]),  # Set the output framerate
+        "-force_key_frames", new_kfs,
         "-f", "matroska", output_file
-    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    ]
+    logger.debug(f"Running FFMpeg command: {' '.join(ffmpeg_cmd)}")
+    
+    result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
     #print(f"FFmpeg stdout: {result.stdout}")
     #print(f"FFmpeg stderr: {result.stderr}")
 
@@ -208,34 +215,51 @@ def split_video(input_file, segments, prefix):
     logger.debug(f"Splitting video {input_file} into segments:")
     logger.debug(f"{segments}")
 
+    segment_times = []
+
     for i, seg in enumerate(segments):
         start, end = seg["start"], seg["end"]
         duration = end - start
-        output_file = f"{prefix}_{i}.mkv"  # Use .mkv extension
-        full_output_path = os.path.join(TEMP_DIR, output_file)
-        split_files.append(full_output_path)
+        logger.debug(f"Segment {i}, {duration}")
+        segment_times.append(str(end))# + duration))
+        output_file_template = f"{prefix}_%1d.mkv"  # Use .mkv extension
+        full_output_path_template = os.path.join(TEMP_DIR, output_file_template)
+        outfile = os.path.join(TEMP_DIR, f"{prefix}_{i}.mkv")
+        split_files.append(outfile)
 
-        ffmpeg_cmd = [
-            "ffmpeg", "-y",
-            "-i", input_file,
-            "-ss", str(start), 
-            "-t", str(duration),
-            "-c", "copy",
-            "-reset_timestamps", "1",
-            "-fflags", "+genpts",
-            "-avoid_negative_ts", "make_zero",
-            "-f", "matroska", full_output_path  # Use .mkv format
-        ]
+    # Use segment muxer https://stackoverflow.com/questions/44580808/how-to-use-ffmpeg-to-split-a-video-and-then-merge-it-smoothly
+    # https://superuser.com/questions/692714/how-to-split-videos-with-ffmpeg-and-segment-times-option
+    segment_times = ','.join(segment_times)
+    logger.debug(f"{outfile} {seg}")
+    ffmpeg_cmd = [
+        "ffmpeg", "-y",
+        #"-ss", str(start),
+        #"-accurate_seek",
+        "-i", input_file,
+        #"-to", str(end),
+        "-map", "0",
+        #"-f", "matroska",
+        "-c", "copy",
+        "-f", "segment",
+        "-segment_format", "matroska",
+        "-segment_times", segment_times,
+        #"-copyts",
+        "-reset_timestamps", "1",
+        "-fflags", "+genpts",
+        "-avoid_negative_ts", "make_zero",
+        #outfile, # Use .mkv format
+        full_output_path_template,
+    ]
 
-        logger.info(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
-        result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        logger.debug(f"FFmpeg stdout: {result.stdout}")
-        logger.debug(f"FFmpeg stderr: {result.stderr}")
+    logger.info(f"Running FFmpeg command: {' '.join(ffmpeg_cmd)}")
+    result = subprocess.run(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+#logger.debug(f"FFmpeg stdout: {result.stdout}")
+#logger.debug(f"FFmpeg stderr: {result.stderr}")
 
-        if result.returncode != 0:
-            raise RuntimeError(f"FFmpeg command failed with return code {result.returncode}")
+    if result.returncode != 0:
+        raise RuntimeError(f"FFmpeg command failed with return code {result.returncode}")
 
-        logger.debug(f"Segment {i} split {start} - {end}: {full_output_path}")
+    logger.debug(f"Segments for {input_file} split with times {segments}: {outfile}")
 
     return split_files
 
@@ -273,7 +297,7 @@ def encode_segments(segments_to_encode):
     write_file_list(compressed_concat_file, compressed_segments, TEMP_DIR)
 
     metadata = get_video_metadata(INPUT_VIDEO)
-    concatenate_segments(compressed_concat_file, COMPRESSED_VIDEO, metadata)
+    concatenate_segments(compressed_concat_file, COMPRESSED_VIDEO, metadata, segments=get_mutated_segments(segments_to_encode))
     logger.info(f"Compression complete: saved as {COMPRESSED_VIDEO}")
 
     return compressed_segments
@@ -291,11 +315,11 @@ def decode_segments(segments):
     #adjusted_segments = adjust_segments_to_keyframes(COMPRESSED_VIDEO, mutated_segments)
 
     #adjusted_segments = mutated_segments
-    split_files = split_video(COMPRESSED_VIDEO, segments, "decode_pre")
     restored_segments = []
 
-    logger.info(f"Beginning decode pass\n{split_files}")
     logger.debug(f"Segments: {segments}")
+    split_files = split_video(COMPRESSED_VIDEO, segments, "decode_pre")
+    logger.info(f"Beginning decode pass\n{split_files}")
 
     for i, seg in enumerate(segments):
         interest = seg["interest"]
@@ -325,10 +349,10 @@ def decode_segments(segments):
     metadata = get_video_metadata(INPUT_VIDEO)
 
     high_fps_video = os.path.join(TEMP_DIR, "high_fps.mkv")
-    concatenate_segments(restored_concat_file, high_fps_video, metadata)
+    concatenate_segments(restored_concat_file, high_fps_video, metadata, segments=segments)
 
     # Reencode to match the framerate to the original video
-    process_segment(high_fps_video, RESTORED_VIDEO, 1.0, mode="decode-final")
+    process_segment(high_fps_video, RESTORED_VIDEO, 1.0, mode="decode-final", segments=segments)
     logger.info(f"Decompression complete: saved as {RESTORED_VIDEO}")
 
 
@@ -340,7 +364,7 @@ if __name__ == "__main__":
 
     if args.metadata:
         with open(metadata_file, "r") as f:
-            metadata = eval(f.read())
+            metadata = eval(f.read()) # TODO: Not this... this is terrible
             original_duration = metadata["duration"]
             SEGMENTS = metadata["segments"]
     else:
@@ -359,11 +383,12 @@ if __name__ == "__main__":
     logger.info(f"Adjusted segments: {encode_adjusted_segments}, Original segments: {pass_thru}")
 
     DEBUG = True
-    skip_encode = False#False
+    skip_encode = False
 
     if not skip_encode:
         logger.info(get_video_metadata(INPUT_VIDEO))
         compressed_segments = encode_segments(encode_adjusted_segments)
+        #compressed_segments = encode_segments(pass_thru)
         # Write metadata file after encoding
         write_metadata_file(f"{os.path.splitext(INPUT_VIDEO)[0]}.mshit", original_duration, SEGMENTS)
     if skip_encode:
@@ -384,12 +409,12 @@ if __name__ == "__main__":
 
     # Rebase the original segments to be relative to the compressed video
     compressed_duration = get_video_duration(COMPRESSED_VIDEO)
-    rebased_segments = get_mutated_segments(compressed_duration, SEGMENTS)
     # Add pass thrus to the rebased segments
-    decode_pass_thru = add_pass_through_segments(rebased_segments, compressed_duration)
+    decode_pass_thru_segments = add_pass_through_segments(SEGMENTS, compressed_duration)
+    rebased_segments = get_mutated_segments(decode_pass_thru_segments)
     # Adjust the rebased segments to keyframes
-    decode_adjusted_segments = adjust_segments_to_keyframes(COMPRESSED_VIDEO, decode_pass_thru, TEMP_DIR)
-    logger.debug(f"Adjusted segments: {decode_adjusted_segments}, Original segments: {decode_pass_thru}")
+    decode_adjusted_segments = adjust_segments_to_keyframes(COMPRESSED_VIDEO, rebased_segments, TEMP_DIR)
+    logger.debug(f"Adjusted segments: {decode_adjusted_segments}, Original segments: {decode_pass_thru_segments}")
     decode_segments(decode_adjusted_segments)
 
     # For testing

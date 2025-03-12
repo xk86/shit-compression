@@ -56,8 +56,11 @@ def get_bit_rate(input_file: str, type: str = "video") -> float:
 
     # Bitrate wasn't stored in the metadata, so we calculate it
     if metadata_check_br[0] == "N/A":
+        logger.debug(f"{input_file} {'audio' if audio else 'video'} bitrate not found, computing average...")
         fail_cmd = ["ffprobe", "-v", "error", "-select_streams", typestr, "-show_packets", "-show_entries", "packet=size", "-of", "csv=p=0", input_file]
         result = subprocess.run(fail_cmd, stdout=subprocess.PIPE, text=True, check=True).stdout.strip().split('\n')
+        #logger.debug(fail_cmd)
+        #logger.debug(result)
         total_size = 0
         for size in result:
             # Handle specific output from an opus file
@@ -66,6 +69,7 @@ def get_bit_rate(input_file: str, type: str = "video") -> float:
             total_size += int(size)
         total_size = total_size * 8
         duration = get_video_duration(input_file)
+        logger.debug(f"{input_file} {'audio' if audio else 'video'} computed avg bitrate: {total_size / duration:.2f}bps")
         return total_size / duration
 
 def get_bit_frame_rate(input_file: str) -> float:
