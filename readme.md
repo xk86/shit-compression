@@ -71,14 +71,9 @@ The reference "codec" is a wrapper around several ffmpeg commands that:
 
   It will then (if `!skip_encode`) run the encoder on the input file, and save the encoded file to `compressed_[target]`.
 
-  After it saves the encoded file, it will save the original mshit metadata used to create it (before any modifications to the timing)
+  After it saves the encoded file, it will save the original mshit metadata that was used to create it (before any modifications to the timing).
 
   It will then run the decoder on `compressed_[target]`, and save the decoded file to `restored_[target]`.
-
-  After
-      
-
-
 
 ## Random Future Optimization Ideas
 ### Interest Heuristics
