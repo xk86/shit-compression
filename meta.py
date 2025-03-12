@@ -2,8 +2,6 @@ import os
 import subprocess
 import logging
 
-# Set up logging
-logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 def add_pass_through_segments(segments, original_duration):
