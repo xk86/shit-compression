@@ -10,13 +10,10 @@ Tuning and optimizing the compression settings during the transcoding/processing
 "Interest" values are currently manually defined, however, there are plenty of heuristics that could be created for determining them, especially if compute power is not a concern.
 ## Current Implementation
 Things are very much a work-in-progress. It's currently platform-specific (hardcoded macos codecs), but it uses ffmpeg on the backend, so with some very minor tweaks, it should be able to work anywhere.
-I had ChatGPT make the first rough draft codebase as a proof-of-concept, but have since manually rewritten most of it. (Turns out, hallucinated code only goes so far)
-The current version is not working, but thats okay.
-Also several glaringly incorrect things.
+It presently has only been tested on macOS
+I had ChatGPT make the first rough draft codebase as a proof-of-concept, but have since manually rewritten most of it. (Turns out, hallucinated code only goes so far, and is not super reliable.)
 At the moment, the mshit file is just python code that is eval'd. This is a terrible idea for a metadata format, for what should be obvious reasons. I'll be changing this soon.
 Expect things to be rough around the edges, as many things aren't working properly at the moment, and a lot remains to be implemented- even this readme isn't fini
-
-Making the timings work and align is quite difficult.
 
 ## Conceptual Overview
 In order to be able to reconstruct the video, (and to keep track of what parts we're interested in), we need to store some basic metadata:
@@ -34,13 +31,13 @@ Additionally, we need to store the original duration of the video we are compres
 The reference "codec" is a wrapper around several ffmpeg commands that:
   Given a metadata file (duration, followed by a list of times and values Scenes of Interest (called "Segments" in the code)), a "source" file (the originally encoded video), and a "target" file (name of the video we are making (or want to decode, if we're decoding)):
 1. Turn our metadata (.mshit) into something useful:
-  1. If we're decoding, and the metadata is in reference to the source video (which it should be\*), transform the metadata to be relative to the new video.
-    2. Add "identity" scenes (with an interest value of 1) to fill gaps in the metadata.
-    3. Align the new list of scenes with the video we're using as input.
+    1. If we're decoding, and the metadata is in reference to the source video (which it should be\*), transform the metadata to be relative to the new video.
+      1. Add "identity" scenes (with an interest value of 1) to fill gaps in the metadata.
+      2. Align the new list of scenes with the video we're using as input.
   2. Split the file up at those points, along the keyframes.
   3. For each of the split up scenes:
-    1. If the scene has an interest value of 1, we don't touch it.
-    2. Otherwise, apply the effect filter for the decode/encode pass to speed up/slow down the scene by the interest factor we got from metadata (or computed, for decode).
+      1. If the scene has an interest value of 1, we don't touch it.
+      2. Otherwise, apply the effect filter for the decode/encode pass to speed up/slow down the scene by the interest factor we got from metadata (or computed, for decode).
      - For the encode pass:
        - Note that just because something is theoretically lossless under processing does not mean the final compressed video (and resulting restored video) will be lossless. That is just in reference to how much gets lost between this step, and step 4, as a result of the processing. This algorithm will always fundamentally be lossy, regardless of processing technique.
         - Video: 
@@ -64,7 +61,7 @@ The reference "codec" is a wrapper around several ffmpeg commands that:
             - This will always be really crunchy, as we're lowering the sample rate from an already normal one to a much lower rate.
           - Rubberband (Slow, really funny):
             - Uses `rubberband` to give everything that stretched out quality. Might have applications at some point, but it's mostly just aesthetic.
-    4. Combine the split up scenes back into one video.
+  4. Combine the split up scenes back into one video.
       - This part has several caveats and oddities, mostly owing to the fact that we left the scenes we were interested in with their original codec settings using ffmpeg's `copy` codec.
       - Presently, this problem is solved by controlling the input codec settings, and also matching them as we modify each intermediary scene.
         - This is sub-optimal, and we want to keep the amount of transcoding that's done during the frame/audio manipulation stage- excessively transcoding causes either size inflation, or degradation of quality.
@@ -82,12 +79,25 @@ The reference "codec" is a wrapper around several ffmpeg commands that:
 ## Random Future Optimization Ideas
 ### Interest Heuristics
 Obviously, the most interesting problem, which is why it's up to you, dear reader.
+- The solution that's *en vogue* would be to throw an LLM at the problem. 
+  - For this use, something like [LLaVA-NeXT](https://github.com/LLaVA-VL/LLaVA-NeXT) might be interesting. Its authors recommend [lmms](https://lmms-lab.github.io/posts/lmms-eval-0.2/).
+  - Other vision-language models may also work, though using a model that's trained on video has obvious benefits of being able to understand video in context more.
+- Other solutions I've come up with:
+  - Audio volume change based interest.
+    - Measure changes in audio volume relative to average (or some other metric) to heuristically pick scenes.
+    - I suggest two "reference tunings" (they're the same thing, but backwards):
+      - "Action Tuning": Assigns a lower value to quieter segments, to skip boring dialog.
+      - "Dialog Tuning": Assigns a lower value to louder segments, to skip boring action scenes.
 ### Transcoding
 - Do transcoding in really high framerates, then mix down to settings of original.
 - Weigh keyframes more importantly.
+  - Currently, we force the output video to have certain keyframes so we can process it more if we need to.
 ### Overall
 - Because of how segments are processed, it should be relatively easy to parallelize each part of the algorithm.
 - Split the algorithm into VideoSHIT and AudioSHIT, as video and audio compress differently.
+- Currently, the pipeline is not optimal at all, and likely includes a bunch of redundant steps and unnecessary calculations.
+### Filtering
+- Use ML-based motion interpolation such as [RIFE](https://github.com/hzwer/Practical-RIFE) (this might also speed things up, as it runs on the GPU).
 
 ## Usage
 To run the script, use the following command:
