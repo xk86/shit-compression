@@ -14,8 +14,10 @@ parser.add_argument("input_video", help="Input video file")
 parser.add_argument("target_name", help="Target name for output files")
 parser.add_argument("-t", "--metadata", help="Metadata file containing duration and scenes")
 parser.add_argument('-d', '--decode', help="Only run the decoder", action="store_true")
+parser.add_argument('-s', '--save_for_next_pass', help="Saves the mutated metadata with the interest times relative to the new compressed file, for doing multiple passes.")
+parser.add_argument('-m','--minterp', type=str, help="Turn on motion interpolation during decoding VERY SLOW!) Valid parameters are: 'dup', 'blend', 'mci'. Default: blend", nargs='?', const='blend', choices=['blend','dup','mci'])
 args = parser.parse_args()
-
+# https://stackoverflow.com/questions/15301147/python-argparse-default-value-or-specified-value
 # Define input/output filenames
 INPUT_VIDEO = args.input_video
 COMPRESSED_VIDEO = "compressed_" + args.target_name
@@ -23,7 +25,8 @@ RESTORED_VIDEO = "restored_" + args.target_name
 
 VIDEO_CODEC = "h264_videotoolbox"
 AUDIO_CODEC = "aac_at"
-MINTERP = False
+
+MINTERP = args.minterp
 
 # Split the extension from the filename
 TEMP_DIR = "temp_" + os.path.splitext(args.target_name)[0]
@@ -39,7 +42,7 @@ TEMP_DIR = "temp_" + os.path.splitext(args.target_name)[0]
 #    {"start": 0, "end": 24, "interest": disinterest_rate},  # Speed up the boring dreamworks logo
 #    # According to all known laws of aviation, there is no way a bee should be able to fly.
 #    {"start": 34, "end": 1395, "interest": disinterest_rate},
-#    # Do ya like jazz? - Plate crash
+#    # Do ya like jazz?
 #    {"start": 1397, "end": 5442, "interest": disinterest_rate}, # The rest of the movie...
 #]
 #
@@ -69,8 +72,8 @@ def process_segment(input_file, output_file, interest, mode="encode", segments=[
     target_framerate = 30
     base_audio_sample_rate = get_audio_sample_rate(input_file)
     if base_audio_sample_rate == 0:
-      logger.info("No audio detected in input file, disabling audio")
-      audio = False
+        logger.info("No audio detected in input file, disabling audio")
+        audio = False
     source_audio_sr = get_audio_sample_rate(INPUT_VIDEO)
     fr_cmd = []
     vf_head = "[0:v]"
@@ -108,11 +111,12 @@ def process_segment(input_file, output_file, interest, mode="encode", segments=[
       speed_factor = interest # Value to be used to slow down the video
       source_file_fps = get_video_metadata(INPUT_VIDEO)["fps"]
       logger.debug(f"{str(source_file_fps)} {target_framerate}")
-      # Note that it's equal to the interest, it's already <1.
-      # Uncomment to use setpts instead of minterpolate, much faster, lower quality
+
+      # Set the target framerate, which will be higher if we're doing motion interpolation
+      target_framerate = (source_file_fps * speed_factor) if MINTERP else source_file_fps # for minterpolate
 
       if MINTERP:
-        video_filter += f"minterpolate=fps={target_framerate},minterpolate=mi_mode=blend,setpts={interest}*PTS{vf_tail}"
+        video_filter += f"minterpolate=fps={target_framerate},minterpolate=mi_mode={MINTERP},setpts={interest}*PTS"
       else:
         video_filter += f"setpts={interest}*PTS"
 
@@ -122,7 +126,6 @@ def process_segment(input_file, output_file, interest, mode="encode", segments=[
       audio_filter = f"[0:a]asetrate={base_audio_sample_rate}*{1/interest},aresample={source_audio_sr}[a]"
 
       # Interpolation based filter to reconstruct frames.
-      target_framerate = (source_file_fps * speed_factor) if MINTERP else source_file_fps # for minterpolate
       fr_cmd = ["-r", str(target_framerate)]
 
     # Final decode pass
@@ -384,6 +387,9 @@ if __name__ == "__main__":
     encode_adjusted_segments = adjust_segments_to_keyframes(INPUT_VIDEO, pass_thru, TEMP_DIR)
     logger.info(f"Adjusted segments: {encode_adjusted_segments}, Original segments: {pass_thru}")
 
+
+
+    
     DEBUG = False
     skip_encode = False
     if args.decode:
@@ -424,6 +430,10 @@ if __name__ == "__main__":
     decode_adjusted_segments = adjust_segments_to_keyframes(COMPRESSED_VIDEO, rebased_segments, TEMP_DIR)
     logger.debug(f"Adjusted segments: {decode_adjusted_segments}, Original segments: {decode_pass_thru_segments}")
     decode_segments(decode_adjusted_segments)
+
+    if args.save_for_next_pass:
+        write_metadata_file(f"{os.path.splitext(args.save_for_next_pass)[0]}.mshit",
+                            )
 
     # For testing
     #concatenate_segments("temp/restored_list.txt", RESTORED_VIDEO, get_video_metadata(INPUT_VIDEO))
