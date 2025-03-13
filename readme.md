@@ -32,37 +32,37 @@ Additionally, we need to store the original duration of the video we are compres
 
 The reference "codec" is a wrapper around several ffmpeg commands that:
   Given a metadata file (duration, followed by a list of times and values Scenes of Interest (called "Segments" in the code)), a "source" file (the originally encoded video), and a "target" file (name of the video we are making (or want to decode, if we're decoding)):
-    1. Turn our metadata (.mshit) into something useful:
-      1. If we're decoding, and the metadata is in reference to the source video (which it should be\*), transform the metadata to be relative to the new video.
-      2. Add "identity" scenes (with an interest value of 1) to fill gaps in the metadata.
-      3. Align the new list of scenes with the video we're using as input.
-    2. Split the file up at those points, along the keyframes.
-    3. For each of the split up scenes:
-      1. If the scene has an interest value of 1, we don't touch it.
-       2. Otherwise, apply the effect filter for the decode/encode pass to speed up/slow down the scene by the interest factor we got from metadata (or computed, for decode).
-        - For the encode pass:
-          - Note that just because something is theoretically lossless under processing does not mean the final compressed video (and resulting restored video) will be lossless. That is just in reference to how much gets lost between this step, and step 4, as a result of the processing. This algorithm will always fundamentally be lossy, regardless of processing technique.
-          - Video: 
-            - Presentation Timestamp (PTS) Modification (Fast, theoretically lossless during processing): 
+1. Turn our metadata (.mshit) into something useful:
+  1. If we're decoding, and the metadata is in reference to the source video (which it should be\*), transform the metadata to be relative to the new video.
+    2. Add "identity" scenes (with an interest value of 1) to fill gaps in the metadata.
+    3. Align the new list of scenes with the video we're using as input.
+  2. Split the file up at those points, along the keyframes.
+  3. For each of the split up scenes:
+    1. If the scene has an interest value of 1, we don't touch it.
+    2. Otherwise, apply the effect filter for the decode/encode pass to speed up/slow down the scene by the interest factor we got from metadata (or computed, for decode).
+     - For the encode pass:
+       - Note that just because something is theoretically lossless under processing does not mean the final compressed video (and resulting restored video) will be lossless. That is just in reference to how much gets lost between this step, and step 4, as a result of the processing. This algorithm will always fundamentally be lossy, regardless of processing technique.
+        - Video: 
+          - Presentation Timestamp (PTS) Modification (Fast, theoretically lossless during processing): 
               We can use `setpts` for the video to just double the frame timing.
-          - Audio: 
-            - Upsampling (Fast, theoretically lossless during processing\*, though not in implementation): 
+       - Audio: 
+          - Upsampling (Fast, theoretically lossless during processing\*, though not in implementation): 
               Multiplying the audio sample rate of the original video by 1/interest, and resampling the audio to be compatible with the codec will work here. 
               \*Probably possible to use really high sample rates during intermediate processing, then do a two-pass encode that resamples down, to minimize excessive loss.
             - Rubberband (Slow, very lossy at extreme values, but preserves pitch):
               Uses `librubberband` via ffmpeg's `rubberband` filter to compress the time of the audio. Not really noticeable on the encode.
-        - For the decode pass:
-          - Video: 
-            - PTS Modification (Fast, no synthesized frames): 
+      - For the decode pass:
+        - Video: 
+          - PTS Modification (Fast, no synthesized frames): 
               We can use `setpts` like the encode pass, which is fast, but very low quality in this case.
-            - Motion Interpolation (Slow, surprisingly decent quality):
+          - Motion Interpolation (Slow, surprisingly decent quality):
                We can also use ffmpeg's `minterpolate` filter for motion interpolation, which looks much better (at least for the animated movie trailer I was using as test footage), but runs much, *much* slower. (Might be able to accelerate)
-          - Audio:
-            - Downsampling (Fast):
-              - Uses `asetrate` and `aresample` to slow down the audio.
-              - This will always be really crunchy, as we're lowering the sample rate from an already normal one to a much lower rate.
-            - Rubberband (Slow, really funny):
-              - Uses `rubberband` to give everything that stretched out quality. Might have applications at some point, but it's mostly just aesthetic.
+        - Audio:
+          - Downsampling (Fast):
+            - Uses `asetrate` and `aresample` to slow down the audio.
+            - This will always be really crunchy, as we're lowering the sample rate from an already normal one to a much lower rate.
+          - Rubberband (Slow, really funny):
+            - Uses `rubberband` to give everything that stretched out quality. Might have applications at some point, but it's mostly just aesthetic.
     4. Combine the split up scenes back into one video.
       - This part has several caveats and oddities, mostly owing to the fact that we left the scenes we were interested in with their original codec settings using ffmpeg's `copy` codec.
       - Presently, this problem is solved by controlling the input codec settings, and also matching them as we modify each intermediary scene.
@@ -98,6 +98,9 @@ python shit.py <input_video> <target_name> [-t metadata_file]
 - `input_video`: The input video file to be compressed.
 - `target_name`: The base name for the output files.
 - `-t, --metadata`: (Optional) A metadata file containing the duration and scenes.
+- `-s, --save_for_next_pass <file.mshit>` (Optional) Saves the metadata for the compressed file. This is not needed for decompressing the file, but rather used for if we want to compress it again, with the same scenes. The saved file will have the scenes relative to the compressed file.
+- `-m, --minterp <mode>`: (Optional) Uses ffmpeg's `minterp` motion interpolation filter for frame operations. This is REALLY slow (not hardware accelerated).
+- `-d, --decode`: (Optional) Only run the decoder. Default is to run the encoder, then to run the decoder on the compressed file.
 
 Example:
 
