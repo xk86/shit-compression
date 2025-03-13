@@ -98,25 +98,13 @@ python shit.py <input_video> <target_name> [-t metadata_file]
 
 - `input_video`: The input video file to be compressed.
 - `target_name`: The base name for the output files.
-<<<<<<< HEAD
-- `-d, --decode`: Only runs the decode pass. Default mode runs encode and decode (for testing).
-- `-t, --metadata <file.mshit>`: (Optional) A metadata file containing the duration and scenes.
-- `-s, --save_for_next_pass <file.mshit>`: (Optional) Saves timings for the compressed video. Not normally needed for decoding, but helpful for doing multiple passes.
-- `-m --minterp <mode>`: (Optional, Decode only). Does motion interpolation. Really slow. Valid modes are `dup`, `blend`, and `mci`. Default is `blend`.
-=======
 - `-t, --metadata`: (Optional) A metadata file containing the duration and scenes.
 - `-s, --save_for_next_pass <file.mshit>` (Optional) Saves the metadata for the compressed file. This is not needed for decompressing the file, but rather used for if we want to compress it again, with the same scenes. The saved file will have the scenes relative to the compressed file.
 - `-m, --minterp <mode>`: (Optional) Uses ffmpeg's `minterp` motion interpolation filter for frame operations. This is REALLY slow (not hardware accelerated).
 - `-d, --decode`: (Optional) Only run the decoder. Default is to run the encoder, then to run the decoder on the compressed file.
->>>>>>> refs/remotes/origin/main
 
 Example:
 
 ```
-<<<<<<< HEAD
 python shit.py input.mp4 output -t timings_of_boring_things.mshit
 ```
-=======
-python shit.py input.mp4 output -t metadata.txt
-```
->>>>>>> refs/remotes/origin/main
