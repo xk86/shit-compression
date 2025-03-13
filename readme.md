@@ -110,7 +110,7 @@ python shit.py <input_video> <target_name> [-t metadata_file]
 - `target_name`: The base name for the output files.
 - `-t, --metadata`: (Optional) A metadata file containing the duration and scenes.
 - `-s, --save_for_next_pass <file.mshit>` (Optional) Saves the metadata for the compressed file. This is not needed for decompressing the file, but rather used for if we want to compress it again, with the same scenes. The saved file will have the scenes relative to the compressed file.
-- `-m, --minterp <mode>`: (Optional) Uses ffmpeg's `minterp` motion interpolation filter for frame operations. This is REALLY slow (not hardware accelerated).
+- `-m, --minterp <mode>`: (Optional) Uses ffmpeg's `minterp` motion interpolation filter for frame operations. This is REALLY slow (not hardware accelerated). Valid modes are `blend`, `dup`, and `mci`. Default is `blend`.
 - `-d, --decode`: (Optional) Only run the decoder. Default is to run the encoder, then to run the decoder on the compressed file.
 
 Example:
