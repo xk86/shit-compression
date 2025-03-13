@@ -13,6 +13,7 @@ Things are very much a work-in-progress. It's currently platform-specific (hardc
 I had ChatGPT make the first rough draft codebase as a proof-of-concept, but have since manually rewritten most of it. (Turns out, hallucinated code only goes so far)
 The current version is not working, but thats okay.
 Also several glaringly incorrect things.
+At the moment, the mshit file is just python code that is eval'd. This is a terrible idea for a metadata format, for what should be obvious reasons. I'll be changing this soon.
 Expect things to be rough around the edges, as many things aren't working properly at the moment, and a lot remains to be implemented- even this readme isn't fini
 
 Making the timings work and align is quite difficult.
@@ -97,10 +98,13 @@ python shit.py <input_video> <target_name> [-t metadata_file]
 
 - `input_video`: The input video file to be compressed.
 - `target_name`: The base name for the output files.
-- `-t, --metadata`: (Optional) A metadata file containing the duration and scenes.
+- `-d, --decode`: Only runs the decode pass. Default mode runs encode and decode (for testing).
+- `-t, --metadata <file.mshit>`: (Optional) A metadata file containing the duration and scenes.
+- `-s, --save_for_next_pass <file.mshit>`: (Optional) Saves timings for the compressed video. Not normally needed for decoding, but helpful for doing multiple passes.
+- `-m --minterp <mode>`: (Optional, Decode only). Does motion interpolation. Really slow. Valid modes are `dup`, `blend`, and `mci`. Default is `blend`.
 
 Example:
 
 ```
-python shit.py input.mp4 output -t metadata.txt
+python shit.py input.mp4 output -t timings_of_boring_things.mshit
 ```
