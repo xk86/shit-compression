@@ -13,6 +13,7 @@ parser = argparse.ArgumentParser(description="Scene Human Interest Temporal Comp
 parser.add_argument("input_video", help="Input video file")
 parser.add_argument("target_name", help="Target name for output files")
 parser.add_argument("-t", "--metadata", help="Metadata file containing duration and scenes")
+parser.add_argument('-d', '--decode', help="Only run the decoder", action="store_true")
 args = parser.parse_args()
 
 # Define input/output filenames
@@ -135,7 +136,8 @@ def process_segment(input_file, output_file, interest, mode="encode", segments=[
       
       video_filter += f"null"
 
-      fr_cmd = ["-r", str(target_framerate),]
+      new_kfs = ",".join([str(seg['end']) for seg in segments])
+      fr_cmd = ["-r", str(target_framerate), "-force_key_frames",new_kfs]
 
     metadata = get_video_metadata(INPUT_VIDEO)
     logger.debug(f"target framerate: {target_framerate}")
@@ -383,7 +385,9 @@ if __name__ == "__main__":
     logger.info(f"Adjusted segments: {encode_adjusted_segments}, Original segments: {pass_thru}")
 
     DEBUG = False
-    skip_encode = True
+    skip_encode = False
+    if args.decode:
+       skip_encode = True
 
     if not skip_encode:
         logger.info(get_video_metadata(INPUT_VIDEO))
@@ -392,20 +396,24 @@ if __name__ == "__main__":
         # Write metadata file after encoding
         write_metadata_file(f"{os.path.splitext(INPUT_VIDEO)[0]}.mshit", original_duration, SEGMENTS)
     if skip_encode:
+        #if INPUT_VIDEO == "compressed_SHORBE.mkv" or INPUT_VIDEO == "restored_SHORBE.mkv":
+        COMPRESSED_VIDEO = INPUT_VIDEO
         pass
         #compresed_segments = [TEMP_DIR + "/compressed_" + str(i) + ".mkv" for i in range(len(SEGMENTS))]
         #compressed_segments = ["temp_hip/compressed_0.mkv", "temp_hip/compressed_1.mkv", "temp_hip/compressed_2.mkv", "temp_hip/compressed_3.mkv", "temp_hip/compressed_4.mkv", "temp_hip/compressed_5.mkv"]
         #compressed_segments = ["temp_trail/compressed_0.mkv", "temp_trail/compressed_1.mkv", "temp_trail/compressed_2.mkv", "temp_trail/compressed_3.mkv"]
+        #if INPUT_VIDEO == "compressed_SHORBE.mkv":
+           
 
         # SHORTBEE dir: temp_SHEE
         #  compressed_segments = ["temp_SHEE/compressed_0.mkv", "temp_SHEE/compressed_1.mkv"]
 
-    estimated_compressed_duration = calculate_compressed_duration(original_duration, encode_adjusted_segments)
-    logger.info(f"Estimated compressed duration: {estimated_compressed_duration} seconds")
+    #estimated_compressed_duration = calculate_compressed_duration(original_duration, encode_adjusted_segments)
+    #logger.info(f"Estimated compressed duration: {estimated_compressed_duration} seconds")
 
     ## Calculate estimated expanded duration based on compressed duration
-    estimated_expanded_duration = calculate_expanded_duration(estimated_compressed_duration, encode_adjusted_segments)
-    logger.info(f"Estimated expanded duration: {estimated_expanded_duration} seconds")
+    #estimated_expanded_duration = calculate_expanded_duration(estimated_compressed_duration, encode_adjusted_segments)
+    #logger.info(f"Estimated expanded duration: {estimated_expanded_duration} seconds")
 
     # Rebase the original segments to be relative to the compressed video
     compressed_duration = get_video_duration(COMPRESSED_VIDEO)
