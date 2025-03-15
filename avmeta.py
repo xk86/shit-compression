@@ -147,7 +147,7 @@ def estimate_crf(codec: str, bitrate: int, resolution: tuple, fps: float) -> int
         'libvpx-vp9': (0, 63),
         'av1': (0, 63),
         'aac': (1, 14),
-        'aac_tb': (1, 14),
+        'aac_at': (1, 14),
         'libopus': (64, 128),
         'libvorbis': (0, 10)
     }
