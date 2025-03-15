@@ -116,7 +116,13 @@ def process_segment(input_file, output_file, interest, mode="encode", segments=[
       target_framerate = (source_file_fps * speed_factor) if MINTERP else source_file_fps # for minterpolate
 
       if MINTERP:
-        video_filter += f"minterpolate=fps={target_framerate},minterpolate=mi_mode={MINTERP},setpts={interest}*PTS"
+        # https://www.hellocatfood.com/misusing-ffmpegs-motion-interpolation-options/
+        # Interesting.
+        mi_mode = 'blend'
+        if MINTERP == 'mci':
+            mi_mode = 'mci:me_mode=bidir:me=tdls,minterpolate=scd=none'
+
+        video_filter += f"minterpolate=fps={target_framerate},minterpolate=mi_mode={mi_mode},setpts={interest}*PTS"
       else:
         video_filter += f"setpts={interest}*PTS"
 
@@ -164,7 +170,7 @@ def process_segment(input_file, output_file, interest, mode="encode", segments=[
         "-b:v", str(get_bit_frame_rate(INPUT_VIDEO) * target_framerate),  # Adjust bitrate here
         #"-q:v", str(metadata["vcrf"]), # Value 0-100, 0 is worse, 100 is best (h264_videotoolbox)
         *[s for s in ["-c:a", metadata["acodec"]] if audio],
-        *[s for s in ["-b:a", str(metadata["abitrate"])] if audio],  # Adjust audio bitrate here
+        *[s for s in ["-b:a", str(metadata["abitrate"])] if audio], 
         #"-q:a", str(metadata["acrf"]), # 0-14
         #"-ar", "128000",
         "-fflags", "+genpts",
