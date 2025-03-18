@@ -442,10 +442,13 @@ if __name__ == "__main__":
         decode_adjusted_segments = adjust_segments_to_keyframes(COMPRESSED_VIDEO, rebased_segments, TEMP_DIR)
         logger.debug(f"Adjusted segments: {decode_adjusted_segments}, Original segments: {decode_pass_thru_segments}")
         decode_segments(decode_adjusted_segments)
+    if skip_decode:
+        compressed_duration = calculate_compressed_duration(original_duration, SEGMENTS)
 
     if args.save_for_next_pass:
         write_metadata_file(f"{os.path.splitext(args.save_for_next_pass)[0]}.mshit",
-                            )
+                            compressed_duration,
+                            get_mutated_segments(SEGMENTS))
 
     # For testing
     #concatenate_segments("temp/restored_list.txt", RESTORED_VIDEO, get_video_metadata(INPUT_VIDEO))
