@@ -121,7 +121,7 @@ def get_video_metadata(input_file: str) -> EssentialMetadataDict:
     if vcodec == "hevc":
       vcodec = "hevc_videotoolbox"
     if acodec == "aac":
-      acodec = "aac_tb"
+      acodec = "aac_at"
 
   vcrf = estimate_crf(vcodec, vbitrate, (width, height), fps)
   acrf = estimate_crf(acodec, abitrate, (1, 1), 1)
