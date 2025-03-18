@@ -202,7 +202,7 @@ def concatenate_segments(file_list_path, output_file, metadata, segments=[]):
         "-fflags", "+genpts",
         "-avoid_negative_ts", "make_zero",
         "-reset_timestamps", "1",
-        "-copyts",
+        #"-copyts",
         "-r", str(metadata["fps"]),  # Set the output framerate
         "-force_key_frames", new_kfs,
         "-f", "matroska", output_file
