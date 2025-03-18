@@ -15,6 +15,7 @@ parser.add_argument("target_name", help="Target name for output files")
 parser.add_argument("-t", "--metadata", help="Metadata file containing duration and scenes")
 parser.add_argument('-d', '--decode', help="Only run the decoder", action="store_true")
 parser.add_argument('-s', '--save_for_next_pass', help="Saves the mutated metadata with the interest times relative to the new compressed file, for doing multiple passes.")
+parser.add_argument('-e', '--encode', help="Only run encode pass.", action="store_true")
 parser.add_argument('-m','--minterp', type=str, help="Turn on motion interpolation during decoding VERY SLOW!) Valid parameters are: 'dup', 'blend', 'mci'. Default: blend", nargs='?', const='blend', choices=['blend','dup','mci'])
 args = parser.parse_args()
 # https://stackoverflow.com/questions/15301147/python-argparse-default-value-or-specified-value
@@ -398,8 +399,12 @@ if __name__ == "__main__":
     
     DEBUG = False
     skip_encode = False
+    skip_decode = False
     if args.decode:
        skip_encode = True
+    if args.encode:
+        skip_decode = True
+    
 
     if not skip_encode:
         logger.info(get_video_metadata(INPUT_VIDEO))
@@ -427,15 +432,16 @@ if __name__ == "__main__":
     #estimated_expanded_duration = calculate_expanded_duration(estimated_compressed_duration, encode_adjusted_segments)
     #logger.info(f"Estimated expanded duration: {estimated_expanded_duration} seconds")
 
-    # Rebase the original segments to be relative to the compressed video
-    compressed_duration = get_video_duration(COMPRESSED_VIDEO)
-    # Add pass thrus to the rebased segments
-    decode_pass_thru_segments = add_pass_through_segments(SEGMENTS, compressed_duration)
-    rebased_segments = get_mutated_segments(decode_pass_thru_segments)
-    # Adjust the rebased segments to keyframes
-    decode_adjusted_segments = adjust_segments_to_keyframes(COMPRESSED_VIDEO, rebased_segments, TEMP_DIR)
-    logger.debug(f"Adjusted segments: {decode_adjusted_segments}, Original segments: {decode_pass_thru_segments}")
-    decode_segments(decode_adjusted_segments)
+    if not skip_decode:
+        # Rebase the original segments to be relative to the compressed video
+        compressed_duration = get_video_duration(COMPRESSED_VIDEO)
+        # Add pass thrus to the rebased segments
+        decode_pass_thru_segments = add_pass_through_segments(SEGMENTS, compressed_duration)
+        rebased_segments = get_mutated_segments(decode_pass_thru_segments)
+        # Adjust the rebased segments to keyframes
+        decode_adjusted_segments = adjust_segments_to_keyframes(COMPRESSED_VIDEO, rebased_segments, TEMP_DIR)
+        logger.debug(f"Adjusted segments: {decode_adjusted_segments}, Original segments: {decode_pass_thru_segments}")
+        decode_segments(decode_adjusted_segments)
 
     if args.save_for_next_pass:
         write_metadata_file(f"{os.path.splitext(args.save_for_next_pass)[0]}.mshit",
